@@ -240,7 +240,7 @@ class GGStore:
         return added
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.1.1")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.1.2")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -1128,6 +1128,15 @@ class StartGGMatchPlugin(Star):
             if eid:
                 ids.append(eid)
         return ids
+
+    def _entrant_name_from_slots(
+        self, slots: List[Dict[str, Any]], entrant_id: int
+    ) -> str:
+        for slot in slots:
+            entrant = slot.get("entrant") or {}
+            if _safe_int(entrant.get("id")) == entrant_id:
+                return str(entrant.get("name") or "").strip()
+        return ""
 
     def _is_set_reportable(self, node: Dict[str, Any], entrant_id: int) -> bool:
         """可报分：双方选手已就位且对局未结束（排除晋级后仅一人入位的等待局）。"""
@@ -2319,12 +2328,5 @@ class StartGGMatchPlugin(Star):
             yield event.plain_result(f"报分失败: {e}")
             return
 
-        reported = ((report_resp.get("data") or {}).get("reportBracketSet")) or []
-        if isinstance(reported, list) and reported:
-            state = reported[-1].get("state")
-        else:
-            state = "unknown"
-        msg = f"报分成功。\n赛事: {t_code}\nSet: {target_set}\n比分: {score}\n胜者entrantId: {winner_id}\n状态: {state}"
-        if display_player:
-            msg = f"报分成功（代报选手: {display_player}）。\n赛事: {t_code}\nSet: {target_set}\n比分: {score}\n胜者entrantId: {winner_id}\n状态: {state}"
-        yield event.plain_result(msg)
+        winner_tag = self._entrant_name_from_slots(slots, winner_id) or "未知选手"
+        yield event.plain_result(f"报分成功，胜者为{winner_tag}")
