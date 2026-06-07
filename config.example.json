@@ -1,0 +1,12 @@
+{
+  "_comment": "优先使用 AstrBot WebUI 插件配置（_conf_schema.json）。以下为旧版兼容字段，复制为 config.json 后填写。",
+  "startgg": {
+    "apiToken": "REPLACE_WITH_START_GG_TOKEN"
+  },
+  "defaultTournament": "",
+  "bindingMode": "platform_user_id_as_entrant_id",
+  "reportEnabledDefault": false,
+  "reportSwitchScope": "per_tournament",
+  "reportCooldownSec": 15,
+  "admin_qq_ids": []
+}

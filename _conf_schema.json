@@ -1,0 +1,54 @@
+{
+  "startgg_api_token": {
+    "description": "start.gg API Token",
+    "type": "string",
+    "default": "",
+    "hint": "在 start.gg 开发者后台创建，用于查询对阵与报分",
+    "obvious_hint": true
+  },
+  "admin_qq_ids": {
+    "description": "管理员 QQ 号",
+    "type": "list",
+    "default": [],
+    "hint": "列表中的 QQ 号在群聊与私聊中均拥有插件管理员权限。也可由管理员通过「添加管理员 @用户」动态追加。",
+    "items": {
+      "qq": {
+        "description": "QQ 号",
+        "type": "string",
+        "default": ""
+      }
+    }
+  },
+  "default_tournament": {
+    "description": "默认赛事简码",
+    "type": "string",
+    "default": "",
+    "hint": "留空则使用已绑定赛事中的第一个"
+  },
+  "binding_mode": {
+    "description": "选手身份映射方式",
+    "type": "string",
+    "default": "platform_user_id_as_entrant_id",
+    "options": ["platform_user_id_as_entrant_id"],
+    "hint": "默认将聊天平台用户 ID 作为 start.gg entrantId"
+  },
+  "report_enabled_default": {
+    "description": "报分功能默认开关",
+    "type": "bool",
+    "default": false,
+    "hint": "未单独设置赛事开关时的默认值，建议保持关闭并由管理员手动开启"
+  },
+  "report_switch_scope": {
+    "description": "报分开关作用域",
+    "type": "string",
+    "default": "per_tournament",
+    "options": ["per_tournament", "global"],
+    "hint": "per_tournament：按赛事分别开关；global：全局统一开关"
+  },
+  "report_cooldown_sec": {
+    "description": "报分冷却时间（秒）",
+    "type": "int",
+    "default": 15,
+    "hint": "同一用户对同一 set 的最短报分间隔"
+  }
+}

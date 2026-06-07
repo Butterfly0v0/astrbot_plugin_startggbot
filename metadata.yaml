@@ -1,0 +1,6 @@
+name: astrbot_plugin_startggbot
+display_name: start.gg 对阵查询与报分
+desc: 查询 start.gg 对阵、自助报分与多赛事管理。
+version: v0.1.0
+author: Butterfly0v0
+repo: https://github.com/Butterfly0v0/astrbot_plugin_startggbot
