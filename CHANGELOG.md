@@ -4,6 +4,15 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.1.3] - 2026-06-08
+
+### Changed
+
+- 查询 / 我在哪：群聊优先使用群名片（`card`）匹配选手，与 QQ 昵称区分
+- 查询回复：`查询对象` 直接显示选手名；`对局` 仅显示轮次，不再附带 setId
+- 帮助 / help：群聊以合并转发（`Nodes`）发送指令说明；私聊仍为纯文本
+- 报分指令：命令与参数之间可无空格或多空格（如 `报分2-1`、`报分  2-1`）
+
 ## [v0.1.2] - 2026-06-07
 
 ### Changed
@@ -48,7 +57,8 @@
 - 多赛事切换后会话键不一致导致始终查询第一个绑定赛事的问题
 - 对局查询由错误的 `entrant.sets` 改为 `event.sets(filters: entrantIds)`，修复切换赛事后查不到对局
 
-[Unreleased]: https://github.com/Butterfly0v0/astrbot_plugin_startggbot/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Butterfly0v0/astrbot_plugin_startggbot/compare/v0.1.3...HEAD
+[v0.1.3]: https://github.com/Butterfly0v0/astrbot_plugin_startggbot/compare/v0.1.2...v0.1.3
 [v0.1.2]: https://github.com/Butterfly0v0/astrbot_plugin_startggbot/compare/v0.1.1...v0.1.2
 [v0.1.1]: https://github.com/Butterfly0v0/astrbot_plugin_startggbot/compare/v0.1.0...v0.1.1
 [v0.1.0]: https://github.com/Butterfly0v0/astrbot_plugin_startggbot/releases/tag/v0.1.0

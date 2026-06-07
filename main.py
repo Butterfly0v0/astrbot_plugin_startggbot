@@ -240,7 +240,7 @@ class GGStore:
         return added
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.1.2")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.1.3")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -557,7 +557,38 @@ class StartGGMatchPlugin(Star):
                 return entrant_id, "default_user_id"
         return None, "none"
 
-    def _sender_display_name(self, event: AstrMessageEvent) -> str:
+    def _sender_field(self, event: AstrMessageEvent, *attrs: str) -> str:
+        sources: List[Any] = []
+        msg_obj = getattr(event, "message_obj", None)
+        if msg_obj is not None:
+            sources.append(getattr(msg_obj, "sender", None))
+        sources.append(getattr(event, "sender", None))
+
+        for src in sources:
+            if src is None:
+                continue
+            if isinstance(src, dict):
+                for attr in attrs:
+                    val = src.get(attr)
+                    if val and str(val).strip():
+                        return str(val).strip()
+            else:
+                for attr in attrs:
+                    val = getattr(src, attr, None)
+                    if val and str(val).strip():
+                        return str(val).strip()
+        return ""
+
+    def _sender_query_name(self, event: AstrMessageEvent) -> str:
+        """查询/我在哪：群聊优先群名片（card），与 QQ 昵称区分；私聊用昵称。"""
+        if self._is_group_message(event):
+            card = self._sender_field(event, "card", "group_card")
+            if card:
+                return card
+        for attr in ("nickname", "display_name", "name"):
+            name = self._sender_field(event, attr)
+            if name:
+                return name
         getter = getattr(event, "get_sender_name", None)
         if callable(getter):
             try:
@@ -566,13 +597,11 @@ class StartGGMatchPlugin(Star):
                     return name
             except Exception:
                 pass
-        sender = getattr(event, "sender", None)
-        if sender is not None:
-            for attr in ("nickname", "card", "display_name", "name"):
-                val = getattr(sender, attr, None)
-                if val and str(val).strip():
-                    return str(val).strip()
         return ""
+
+    def _sender_display_name(self, event: AstrMessageEvent) -> str:
+        """通用展示名（报分等）：群聊仍优先群名片。"""
+        return self._sender_query_name(event)
 
     def _entrant_display_names(self, node: Dict[str, Any]) -> List[str]:
         names: List[str] = []
@@ -701,10 +730,11 @@ class StartGGMatchPlugin(Star):
             yield event.plain_result("未找到可用赛事，请先由管理员绑定赛事并切换。")
             return
 
-        keyword = (username or "").strip() or self._sender_display_name(event)
+        query_name = self._sender_query_name(event)
+        keyword = (username or "").strip() or query_name
         if not keyword:
             yield event.plain_result(
-                "无法获取你的用户名，请使用：@机器人 查询 <start.gg用户名>"
+                "无法获取你的群名片/昵称，请使用：@机器人 查询 <start.gg用户名>"
             )
             return
 
@@ -717,12 +747,9 @@ class StartGGMatchPlugin(Star):
             return
         assert entrant_id is not None and matched_name is not None
 
-        source = (
-            f"本人({matched_name})"
-            if keyword == self._sender_display_name(event)
-            else f"指定用户({matched_name})"
-        )
-        async for result in self._query_entrant_match(event, entrant_id, source):
+        async for result in self._query_entrant_match(
+            event, entrant_id, matched_name
+        ):
             yield result
 
     async def _resolve_report_entrant(
@@ -961,10 +988,12 @@ class StartGGMatchPlugin(Star):
         if not normalized:
             return None, ""
         for cmd in MENTION_COMMANDS:
-            if normalized == cmd:
+            if not normalized.startswith(cmd):
+                continue
+            if len(normalized) == len(cmd):
                 return cmd, ""
-            if normalized.startswith(cmd + " "):
-                return cmd, normalized[len(cmd) :].strip()
+            # 命令后可无空格、单空格或多空格，如「报分2-1」「报分  2-1」
+            return cmd, normalized[len(cmd) :].strip()
         return None, normalized
 
     def _set_contains_entrant(
@@ -1463,7 +1492,7 @@ class StartGGMatchPlugin(Star):
         self.store.append_audit(payload)
 
     async def _query_entrant_match(
-        self, event: AstrMessageEvent, entrant_id: int, source: str
+        self, event: AstrMessageEvent, entrant_id: int, query_target: str
     ):
         if not self.token:
             yield event.plain_result("缺少 start.gg apiToken，请先配置。")
@@ -1489,8 +1518,8 @@ class StartGGMatchPlugin(Star):
         state_map = {1: "未开始", 2: "进行中", 3: "已结束"}
         msg = (
             f"赛事: {tournament_code}\n"
-            f"查询对象: {source}\n"
-            f"对局: #{result['setId']} {result['round']}\n"
+            f"查询对象: {query_target}\n"
+            f"对局: {result['round']}\n"
             f"对手: {result['opponent']}\n"
             f"状态: {state_map.get(result['state'], str(result['state']))}"
         )
@@ -1653,29 +1682,48 @@ class StartGGMatchPlugin(Star):
             yield result
         event.stop_event()
 
+    def _help_command_lines(self) -> List[str]:
+        return [
+            "start.gg 对阵查询与报分 · 指令帮助",
+            "用法（群聊请 @ 我）",
+            "@机器人 帮助 / help",
+            "@机器人 赛事列表",
+            "@机器人 我的赛事（管理员，查询 API 账号创建/管理的赛事与简码）",
+            "@机器人 绑定赛事 [简码] <eventId|链接> [phaseGroupId]（省略简码时用 tournament 名）",
+            "@机器人 绑定赛事链接 [简码] <start.gg链接> [phaseGroupId]",
+            "@机器人 绑定赛事全参 [简码] <名称> <eventId> [phaseGroupId]",
+            "@机器人 解绑赛事 <简码>",
+            "@机器人 赛事详情 <简码>",
+            "@机器人 切换 <赛事简码>",
+            "@机器人 绑定 <entrantId>",
+            "@机器人 我在哪",
+            "@机器人 查询 [用户名]（省略时群聊用群名片匹配；已结束显示比分）",
+            "@机器人 set <setId>",
+            "@机器人 报分 <选手局数>-<对手局数> [setId]（前者为报分选手，大数胜）",
+            "@机器人 报分 <选手名> <选手局数>-<对手局数> [setId]（管理员代报）",
+            "@机器人 报分开关 <on|off> [赛事简码]",
+            "@机器人 报分状态 [赛事简码]",
+            "@机器人 添加管理员 @用户（管理员，写入动态管理员列表）",
+        ]
+
+    def _build_help_forward_nodes(self, event: AstrMessageEvent) -> Comp.Nodes:
+        bot_uin = self._bot_self_id(event) or "0"
+        bot_name = "start.gg 帮助"
+        nodes = [
+            Comp.Node(
+                uin=bot_uin,
+                name=bot_name,
+                content=[Comp.Plain(line)],
+            )
+            for line in self._help_command_lines()
+        ]
+        return Comp.Nodes(nodes=nodes)
+
     async def _handle_help(self, event: AstrMessageEvent, _args: str):
-        msg = (
-            "用法（群聊请 @ 我）：\n"
-            "@机器人 帮助\n"
-            "@机器人 赛事列表\n"
-            "@机器人 我的赛事（管理员，查询 API 账号创建/管理的赛事与简码）\n"
-            "@机器人 绑定赛事 [简码] <eventId|链接> [phaseGroupId]（省略简码时用 tournament 名）\n"
-            "@机器人 绑定赛事链接 [简码] <start.gg链接> [phaseGroupId]\n"
-            "@机器人 绑定赛事全参 [简码] <名称> <eventId> [phaseGroupId]\n"
-            "@机器人 解绑赛事 <简码>\n"
-            "@机器人 赛事详情 <简码>\n"
-            "@机器人 切换 <赛事简码>\n"
-            "@机器人 绑定 <entrantId>\n"
-            "@机器人 我在哪\n"
-            "@机器人 查询 [用户名]（最近一场对局；已结束显示比分）\n"
-            "@机器人 set <setId>\n"
-            "@机器人 报分 <选手局数>-<对手局数> [setId]（前者为报分选手）\n"
-            "@机器人 报分 <选手名> <选手局数>-<对手局数> [setId]（管理员代报）\n"
-            "@机器人 报分开关 <on|off> [赛事简码]\n"
-            "@机器人 报分状态 [赛事简码]\n"
-            "@机器人 添加管理员 @用户（管理员，写入动态管理员列表）"
-        )
-        yield event.plain_result(msg)
+        if self._is_group_message(event):
+            yield event.chain_result([self._build_help_forward_nodes(event)])
+            return
+        yield event.plain_result("\n".join(self._help_command_lines()))
 
     async def _handle_add_admin(self, event: AstrMessageEvent, args: str):
         if not self._is_admin(event):
