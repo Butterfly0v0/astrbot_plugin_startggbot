@@ -240,7 +240,7 @@ class GGStore:
         return added
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.1.0")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.1.1")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -843,48 +843,49 @@ class StartGGMatchPlugin(Star):
     def _parse_report_args(
         self, event: AstrMessageEvent, arg_str: str
     ) -> Tuple[Optional[Dict[str, str]], str]:
-        """解析报分参数。管理员可在比分前填写选手名代报。"""
+        """解析报分参数。比分格式为 <选手局数>-<对手局数>，胜者为较大一方。"""
         usage = (
-            "用法：@机器人 报分 <比分> <我|对手> [setId]\n"
-            "管理员代报：@机器人 报分 <选手名> <比分> <我|对手> [setId]"
+            "用法：@机器人 报分 <选手局数>-<对手局数> [setId]\n"
+            "管理员代报：@机器人 报分 <选手名> <选手局数>-<对手局数> [setId]"
         )
         parts = self._split_args(arg_str)
-        if len(parts) < 2:
+        if not parts:
             return None, usage
 
         score_idx: Optional[int] = None
         for i, part in enumerate(parts):
-            if self._parse_score(part) and i + 1 < len(parts):
+            if self._parse_score(part):
                 score_idx = i
                 break
 
         if score_idx is None:
-            return None, "比分格式错误，示例：@机器人 报分 2-1 我"
+            return None, "比分格式错误，示例：@机器人 报分 2-1"
 
         score = parts[score_idx]
-        winner = parts[score_idx + 1]
-        set_id = parts[score_idx + 2] if len(parts) > score_idx + 2 else ""
+        set_id = ""
+        if len(parts) > score_idx + 1:
+            tail = parts[score_idx + 1]
+            if _safe_int(tail):
+                set_id = tail
+            else:
+                return None, f"未知参数「{tail}」。{usage}"
 
         if score_idx == 0:
             return {
                 "player_name": "",
                 "score": score,
-                "winner": winner,
                 "set_id": set_id,
             }, ""
 
         player_name = " ".join(parts[:score_idx]).strip()
         if not self._is_admin(event):
-            return None, (
-                "非管理员不能以选手名代报。请使用：@机器人 报分 <比分> <我|对手> [setId]"
-            )
+            return None, "非管理员不能以选手名代报。请使用：@机器人 报分 <选手局数>-<对手局数> [setId]"
         if not player_name:
             return None, usage
 
         return {
             "player_name": player_name,
             "score": score,
-            "winner": winner,
             "set_id": set_id,
         }, ""
 
@@ -1244,7 +1245,7 @@ class StartGGMatchPlugin(Star):
                 msg += (
                     f"\n你最近一场为等待对手/轮空的晋级位"
                     f"（#{set_id} {round_text}），请对已打完且双方到位的对局报分；"
-                    f"若查询里能看到上一场 setId，请使用：@机器人 报分 <比分> <我|对手> <setId>"
+                    f"若查询里能看到上一场 setId，请使用：@机器人 报分 <选手局数>-<对手局数> <setId>"
                 )
             elif hint.startswith("completed:"):
                 set_id = hint.split(":", 1)[-1]
@@ -1659,8 +1660,8 @@ class StartGGMatchPlugin(Star):
             "@机器人 我在哪\n"
             "@机器人 查询 [用户名]（最近一场对局；已结束显示比分）\n"
             "@机器人 set <setId>\n"
-            "@机器人 报分 <比分> <我|对手> [setId]\n"
-            "@机器人 报分 <选手名> <比分> <我|对手> [setId]（管理员代报）\n"
+            "@机器人 报分 <选手局数>-<对手局数> [setId]（前者为报分选手）\n"
+            "@机器人 报分 <选手名> <选手局数>-<对手局数> [setId]（管理员代报）\n"
             "@机器人 报分开关 <on|off> [赛事简码]\n"
             "@机器人 报分状态 [赛事简码]\n"
             "@机器人 添加管理员 @用户（管理员，写入动态管理员列表）"
@@ -2166,7 +2167,6 @@ class StartGGMatchPlugin(Star):
         assert report_args is not None
 
         score = report_args["score"]
-        winner = report_args["winner"]
         set_id = report_args["set_id"]
         player_name = report_args["player_name"]
         proxy_report = bool(player_name)
@@ -2181,9 +2181,12 @@ class StartGGMatchPlugin(Star):
 
         parsed_score = self._parse_score(score)
         if not parsed_score:
-            yield event.plain_result("比分格式错误，示例：@机器人 报分 2-1 我")
+            yield event.plain_result("比分格式错误，示例：@机器人 报分 2-1")
             return
         my_wins, opp_wins = parsed_score
+        if my_wins == opp_wins:
+            yield event.plain_result("比分不能平局，请填写如 2-1、2-0。")
+            return
 
         sender = self._sender_id(event)
         sid = _safe_int(set_id)
@@ -2257,28 +2260,12 @@ class StartGGMatchPlugin(Star):
 
         my_idx = entrant_ids.index(entrant_id)
         opp_idx = 1 if my_idx == 0 else 0
-        winner_key = winner.strip().lower()
-        if winner_key in {"我", "me", "self"}:
+        if my_wins > opp_wins:
             winner_id = entrant_ids[my_idx]
-            winner_wins, loser_wins = my_wins, opp_wins
-        elif winner_key in {"对手", "op", "opp", "opponent"}:
-            winner_id = entrant_ids[opp_idx]
-            winner_wins, loser_wins = opp_wins, my_wins
+            winner_side = "player"
         else:
-            winner_id = _safe_int(winner)
-            if winner_id not in entrant_ids:
-                yield event.plain_result("胜者参数无效，请填 我/对手 或该场 entrantId。")
-                return
-            if winner_id == entrant_ids[my_idx]:
-                winner_wins, loser_wins = my_wins, opp_wins
-            else:
-                winner_wins, loser_wins = opp_wins, my_wins
-
-        if winner_wins <= loser_wins:
-            yield event.plain_result(
-                f"比分 {score} 与胜者不一致：胜者至少需要 {loser_wins + 1} 局。"
-            )
-            return
+            winner_id = entrant_ids[opp_idx]
+            winner_side = "opponent"
 
         if my_idx == 0:
             entrant1_wins, entrant2_wins = my_wins, opp_wins
@@ -2302,7 +2289,7 @@ class StartGGMatchPlugin(Star):
                 "tournament": t_code,
                 "setId": target_set,
                 "scoreInput": score,
-                "winnerInput": winner,
+                "winnerSide": winner_side,
                 "winnerId": winner_id,
                 "gameData": game_data,
                 "proxyReport": proxy_report,
@@ -2320,7 +2307,7 @@ class StartGGMatchPlugin(Star):
                 "tournament": t_code,
                 "setId": target_set,
                 "scoreInput": score,
-                "winnerInput": winner,
+                "winnerSide": winner_side,
                 "proxyReport": proxy_report,
                 "status": "failed",
                 "error": str(e),
