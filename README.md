@@ -22,10 +22,11 @@ AstrBot 插件：查询 [start.gg](https://www.start.gg) 对阵并支持自助�
 - 查询指定 set 详情
 - 报分开关（管理员手动开启/关闭）
 - 自助报分（含 `gameData` 局分上报）；管理员可按选手名代报
-- 报分按群名片/昵称匹配选手（与「查询」一致），支持指定 `setId` 补报
+- 报分：已关联 start.gg 账号的用户按关联身份报分；未关联则按群名片/昵称匹配（与「查询」一致），支持指定 `setId` 补报
 - 群聊中 `帮助` / `help` 以合并转发发送指令说明（OneBot v11）
 - 默认映射：聊天平台 `userId` 作为 start.gg `entrantId`；支持手动 `entrantId` 绑定覆盖
 - 报分审计日志
+- **WebUI 管理面板**（插件详情 → `manage`）：赛事绑定/解绑/切换、QQ-start.gg 账号关联与导出
 - **@ 机器人触发指令**（群聊）；私聊可直接发送指令文本
 
 ## 安装
@@ -46,8 +47,18 @@ AstrBot 插件：查询 [start.gg](https://www.start.gg) 对阵并支持自助�
 | `report_enabled_default` | 报分默认开关 |
 | `report_switch_scope` | 报分开关作用域 |
 | `report_cooldown_sec` | 报分冷却秒数 |
+| `manage_page_hint` | WebUI 管理面板说明（只读） |
 
-赛事通过聊天指令绑定，无需写入配置文件。
+赛事可通过聊天指令或 WebUI「赛事与账号管理」页面绑定，无需写入配置文件。
+
+### WebUI 管理面板
+
+在 AstrBot 插件详情页打开 **manage / 赛事与账号管理**：
+
+- 查看已绑定赛事，绑定新赛事（eventId 或 start.gg 链接），解绑，切换当前赛事
+- 管理 QQ 与 start.gg 账号关联（唯一代码、用户 ID），并导出 TXT / CSV / JSON
+
+关联数据保存在 `data/account_links.json`；全局当前赛事保存在 `data/settings.json`。
 
 ## 指令
 
@@ -71,6 +82,7 @@ AstrBot 插件：查询 [start.gg](https://www.start.gg) 对阵并支持自助�
 - `@机器人 报分 <选手局数>-<对手局数> [setId]`
 - `@机器人 报分 <选手名> <选手局数>-<对手局数> [setId]`（管理员代报）
 - `@机器人 添加管理员 @用户`
+- `@机器人 关联 <start.gg唯一代码或链接>`
 
 ### 查询回复格式
 

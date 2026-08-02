@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>赛事与账号管理</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-header">
+        <h1 id="page-title">赛事与账号管理</h1>
+        <p class="subtitle">绑定 / 解绑赛事、切换当前赛事，以及 QQ 与 start.gg 账号关联</p>
+      </header>
+
+      <section class="card" id="section-tournaments">
+        <div class="card-header">
+          <h2>已绑定赛事</h2>
+          <button type="button" class="btn secondary" id="btn-refresh-tournaments">刷新</button>
+        </div>
+        <p class="hint" id="active-tournament-hint">当前赛事：加载中…</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>简码</th>
+                <th>名称</th>
+                <th>eventId</th>
+                <th>phaseGroupId</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="tournament-rows">
+              <tr><td colspan="5" class="empty">加载中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="form-block">
+          <h3>绑定赛事</h3>
+          <div class="form-grid">
+            <label>
+              简码（可选）
+              <input type="text" id="bind-code" placeholder="留空则自动生成" />
+            </label>
+            <label>
+              eventId 或 start.gg 链接
+              <input type="text" id="bind-reference" placeholder="123456 或 https://www.start.gg/tournament/..." />
+            </label>
+            <label>
+              phaseGroupId（可选）
+              <input type="text" id="bind-pgid" placeholder="留空" />
+            </label>
+          </div>
+          <button type="button" class="btn primary" id="btn-bind-tournament">绑定赛事</button>
+        </div>
+      </section>
+
+      <section class="card" id="section-links">
+        <div class="card-header">
+          <h2>QQ ↔ start.gg 账号关联</h2>
+          <div class="btn-group">
+            <button type="button" class="btn secondary" id="btn-refresh-links">刷新</button>
+            <button type="button" class="btn secondary" id="btn-export-txt">导出 TXT</button>
+            <button type="button" class="btn secondary" id="btn-export-csv">导出 CSV</button>
+            <button type="button" class="btn secondary" id="btn-export-json">导出 JSON</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>QQ 号</th>
+                <th>start.gg 唯一代码</th>
+                <th>start.gg 用户 ID</th>
+                <th>选手 ID</th>
+                <th>选手名</th>
+                <th>关联时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="link-rows">
+              <tr><td colspan="7" class="empty">加载中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="form-block">
+          <h3>添加关联</h3>
+          <div class="form-grid">
+            <label>
+              QQ 号
+              <input type="text" id="link-qq" placeholder="123456789" />
+            </label>
+            <label>
+              start.gg 唯一代码或链接
+              <input type="text" id="link-code" placeholder="1c97bdae 或 user/1c97bdae" />
+            </label>
+          </div>
+          <button type="button" class="btn primary" id="btn-add-link">添加关联</button>
+        </div>
+      </section>
+
+      <p class="status" id="status" aria-live="polite"></p>
+    </div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

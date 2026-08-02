@@ -1,0 +1,8 @@
+{
+  "pages": {
+    "manage": {
+      "title": "赛事与账号管理",
+      "description": "绑定/解绑赛事、切换当前赛事，以及 QQ 与 start.gg 账号关联管理。"
+    }
+  }
+}

@@ -4,6 +4,19 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.0] - 2026-06-08
+
+### Added
+
+- WebUI 插件 Page「赛事与账号管理」（`pages/manage`）：展示已绑定赛事列表，支持绑定、解绑与切换当前赛事
+- QQ ↔ start.gg 账号关联：可通过 start.gg 唯一代码（或用户链接）关联；配置页可查看 QQ 号、唯一代码、start.gg 用户 ID，并导出 TXT / CSV / JSON
+- 聊天指令 `@机器人 关联 <唯一代码或链接>`：用户自助绑定 start.gg 账号
+- 全局当前赛事（`data/settings.json`）：WebUI 切换的赛事在会话未单独切换时作为默认赛事
+
+### Changed
+
+- 报分：已关联 start.gg 账号的用户按关联身份（选手 ID / gamerTag）报分，不再依赖群名片或昵称；未关联用户保持原有匹配方式
+
 ## [v0.1.3] - 2026-06-08
 
 ### Changed

@@ -50,5 +50,11 @@
     "type": "int",
     "default": 15,
     "hint": "同一用户对同一 set 的最短报分间隔"
+  },
+  "manage_page_hint": {
+    "description": "WebUI 管理面板",
+    "type": "string",
+    "default": "在插件详情页打开「manage / 赛事与账号管理」页面，可查看已绑定赛事、绑定/解绑/切换当前赛事，以及管理 QQ 与 start.gg 账号关联并导出列表。",
+    "hint": "只读说明；实际管理请进入插件 Pages"
   }
 }
