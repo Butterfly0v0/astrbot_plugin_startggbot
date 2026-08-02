@@ -60,6 +60,50 @@ AstrBot 插件：查询 [start.gg](https://www.start.gg) 对阵并支持自助�
 
 关联数据保存在 `data/account_links.json`；全局当前赛事保存在 `data/settings.json`。
 
+### 绑定 start.gg 账号
+
+将 QQ 号与 start.gg 账号关联后，**报分时会优先使用关联身份**（按 start.gg 选手 ID / gamerTag 匹配），不再依赖群名片或 QQ 昵称。未关联的用户仍按原有方式（群名片/昵称）报分。
+
+#### 唯一代码是什么？
+
+start.gg 个人主页 URL 中的用户标识，例如：
+
+- 链接：`https://www.start.gg/user/1c97bdae`
+- 唯一代码可填写：`1c97bdae` 或 `user/1c97bdae`（完整链接也可）
+
+在 start.gg 网站打开你的个人主页，地址栏中 `user/` 后面的部分即为唯一代码。
+
+#### 用户自助绑定（推荐）
+
+群聊 @ 机器人，或私聊直接发送：
+
+```
+@机器人 关联 1c97bdae
+@机器人 关联 user/1c97bdae
+@机器人 关联 https://www.start.gg/user/1c97bdae
+```
+
+绑定成功后会回复 QQ 号、唯一代码、start.gg 用户 ID 与选手名。
+
+#### 管理员在 WebUI 绑定
+
+插件详情页 → **manage / 赛事与账号管理** → 「QQ ↔ start.gg 账号关联」：
+
+1. 填写 QQ 号与 start.gg 唯一代码（或链接）
+2. 点击「添加关联」
+3. 可在列表中查看、删除关联，或导出 TXT / CSV / JSON
+
+#### 关联后如何报分
+
+已关联用户直接报分即可，无需与群名片一致：
+
+```
+@机器人 报分 2-1
+@机器人 报分 2-1 12345678   # 指定 setId 补报
+```
+
+若提示「在当前赛事中未找到对应选手」，请确认已切换至正确赛事，且该 start.gg 账号已在该赛事中报名。
+
 ## 指令
 
 群聊请 **@机器人** 后发送指令；私聊可直接发送指令文本。
@@ -115,6 +159,7 @@ AstrBot 插件：查询 [start.gg](https://www.start.gg) 对阵并支持自助�
 @机器人 报分 0-2
 @机器人 报分 gamera 2-0   # 管理员代报
 @机器人 报分 2-1 12345678 # 指定 setId
+@机器人 关联 1c97bdae      # 绑定 start.gg 账号
 # 成功回复：报分成功，胜者为PlayerName
 ```
 
@@ -124,6 +169,8 @@ AstrBot 插件：查询 [start.gg](https://www.start.gg) 对阵并支持自助�
 
 - `bindings.json`：手动绑定
 - `tournaments.json`：动态绑定赛事
+- `account_links.json`：QQ ↔ start.gg 账号关联
+- `settings.json`：WebUI 全局当前赛事
 - `report_switch.json`：报分开关
 - `admin_qq_ids.json`：动态管理员
 - `audit_log.jsonl`：审计日志
