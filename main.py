@@ -73,6 +73,7 @@ MENTION_COMMANDS = [
     "绑定赛事链接",
     "绑定赛事",
     "添加管理员",
+    "解除关联",
     "关联",
     "解绑赛事",
     "赛事详情",
@@ -314,7 +315,7 @@ class GGStore:
         return True
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.2")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.4")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -845,18 +846,17 @@ class StartGGMatchPlugin(Star):
             yield event.plain_result("未找到可用赛事，请先由管理员绑定赛事并切换。")
             return
 
-        query_name = self._sender_query_name(event)
-        keyword = (username or "").strip() or query_name
-        if not keyword:
-            yield event.plain_result(
-                "无法获取你的群名片/昵称，请使用：@机器人 查询 <start.gg用户名>"
-            )
-            return
-
         client = StartGGClient(self.token)
-        entrant_id, matched_name, err = await self._find_entrant_by_username(
-            client, self.tournaments[tournament_code], keyword
-        )
+        tournament = self.tournaments[tournament_code]
+        explicit_name = (username or "").strip()
+        if explicit_name:
+            entrant_id, matched_name, err = await self._find_entrant_by_username(
+                client, tournament, explicit_name
+            )
+        else:
+            entrant_id, matched_name, err = await self._resolve_self_entrant(
+                event, client, tournament, allow_entrant_id_fallback=False
+            )
         if err:
             yield event.plain_result(err)
             return
@@ -958,6 +958,54 @@ class StartGGMatchPlugin(Star):
             "请确认已切换至正确赛事，且该账号已报名参赛。",
         )
 
+    async def _resolve_self_entrant(
+        self,
+        event: AstrMessageEvent,
+        client: StartGGClient,
+        tournament: TournamentConfig,
+        *,
+        allow_entrant_id_fallback: bool = False,
+    ) -> Tuple[Optional[int], Optional[str], str]:
+        """本人身份解析：已关联 start.gg 账号优先，否则群名片/昵称；关联失败不回退昵称。"""
+        account_link = self._get_sender_account_link(event)
+        if account_link:
+            entrant_id, matched_name, err = await self._find_entrant_by_linked_account(
+                client, tournament, account_link
+            )
+            if err:
+                return None, None, err
+            assert entrant_id is not None and matched_name is not None
+            return entrant_id, matched_name, ""
+
+        keyword = self._sender_query_name(event)
+        if keyword:
+            entrant_id, matched_name, err = await self._find_entrant_by_username(
+                client, tournament, keyword
+            )
+            if entrant_id and matched_name:
+                return entrant_id, matched_name, ""
+            if err and "未在当前赛事中找到" not in err:
+                return None, None, err
+
+        if allow_entrant_id_fallback:
+            entrant_id, _ = self._resolve_entrant_id(event)
+            if entrant_id:
+                return entrant_id, keyword or str(entrant_id), ""
+
+        if not keyword:
+            return (
+                None,
+                None,
+                "无法获取你的群名片/昵称。请先 @机器人 关联 <start.gg唯一代码>，"
+                "或使用：@机器人 查询 <start.gg用户名>",
+            )
+        return (
+            None,
+            None,
+            f"未在当前赛事中找到用户「{keyword}」。"
+            "可先 @机器人 关联 <start.gg唯一代码> 绑定账号。",
+        )
+
     async def _resolve_report_entrant(
         self,
         event: AstrMessageEvent,
@@ -975,36 +1023,18 @@ class StartGGMatchPlugin(Star):
             assert entrant_id is not None and matched_name is not None
             return entrant_id, f"指定选手({matched_name})", ""
 
+        entrant_id, matched_name, err = await self._resolve_self_entrant(
+            event, client, tournament, allow_entrant_id_fallback=True
+        )
+        if err:
+            return None, "", err
+        assert entrant_id is not None and matched_name is not None
+
         account_link = self._get_sender_account_link(event)
         if account_link:
-            entrant_id, matched_name, err = await self._find_entrant_by_linked_account(
-                client, tournament, account_link
-            )
-            if err:
-                return None, "", err
-            assert entrant_id is not None and matched_name is not None
             tag = str(account_link.get("gamer_tag") or matched_name)
             return entrant_id, f"关联账号({tag})", ""
-
-        keyword = self._sender_display_name(event)
-        if keyword:
-            entrant_id, matched_name, err = await self._find_entrant_by_username(
-                client, tournament, keyword
-            )
-            if entrant_id and matched_name:
-                return entrant_id, f"本人({matched_name})", ""
-            if err and "未在当前赛事中找到" not in err:
-                return None, "", err
-
-        entrant_id, source = self._resolve_entrant_id(event)
-        if entrant_id:
-            return entrant_id, source, ""
-        return (
-            None,
-            "",
-            "无法解析选手。请先 @机器人 关联 <start.gg唯一代码>，"
-            "或使用与 start.gg 一致的昵称报分，或 @机器人 绑定 <entrantId>。",
-        )
+        return entrant_id, f"本人({matched_name})", ""
 
     def _is_report_enabled(self, tournament_code: Optional[str]) -> bool:
         switch_data = self.store.get_report_switch()
@@ -1750,11 +1780,58 @@ class StartGGMatchPlugin(Star):
             "startgg_code": str(record.get("startgg_code", "")),
             "startgg_user_id": str(record.get("startgg_user_id", "")),
             "startgg_player_id": str(record.get("startgg_player_id", "") or ""),
+            "prefix": str(record.get("prefix", "") or ""),
             "gamer_tag": str(record.get("gamer_tag", "") or ""),
             "linked_at": linked_at,
             "linked_at_text": self._format_ts_text(linked_at),
             "linked_by": str(record.get("linked_by", "") or ""),
+            "profile_updated_at": record.get("profile_updated_at"),
+            "profile_updated_at_text": self._format_ts_text(record.get("profile_updated_at")),
         }
+
+    def _build_account_link_record(
+        self,
+        qq_id: str,
+        user_info: Dict[str, Any],
+        operator: str,
+        existing: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        now = _now_ts()
+        base = existing or {}
+        return {
+            "qq_id": qq_id,
+            "startgg_code": user_info["startgg_code"],
+            "startgg_user_id": str(user_info["startgg_user_id"]),
+            "startgg_player_id": (
+                str(user_info["startgg_player_id"])
+                if user_info.get("startgg_player_id")
+                else ""
+            ),
+            "prefix": str(user_info.get("prefix") or "").strip(),
+            "gamer_tag": str(user_info.get("gamer_tag") or "").strip(),
+            "linked_at": base.get("linked_at") or now,
+            "linked_by": base.get("linked_by") or operator,
+            "profile_updated_at": now,
+        }
+
+    async def _refresh_account_link_profile(
+        self, record: Dict[str, Any]
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
+        if not self.token:
+            return None, "缺少 start.gg apiToken，请先配置。"
+        slug = str(record.get("startgg_code") or "").strip()
+        if not slug:
+            return None, "缺少 start.gg 唯一代码，无法刷新选手信息。"
+        client = StartGGClient(self.token)
+        try:
+            user_info, err = await self._query_startgg_user_by_slug(client, slug)
+        except Exception as e:
+            return None, f"查询 start.gg 用户失败: {e}"
+        if err or not user_info:
+            return None, err or "未找到 start.gg 用户。"
+        qq_id = str(record.get("qq_id") or "")
+        operator = str(record.get("linked_by") or "webui")
+        return self._build_account_link_record(qq_id, user_info, operator, existing=record), ""
 
     def _list_account_link_rows(self) -> List[Dict[str, Any]]:
         rows = [
@@ -1775,6 +1852,7 @@ class StartGGMatchPlugin(Star):
                 slug
                 player {
                   id
+                  prefix
                   gamerTag
                 }
               }
@@ -1794,6 +1872,7 @@ class StartGGMatchPlugin(Star):
             "startgg_user_id": user_id,
             "startgg_code": str(user_data.get("slug") or slug),
             "startgg_player_id": _safe_int(player.get("id")),
+            "prefix": str(player.get("prefix") or "").strip(),
             "gamer_tag": str(player.get("gamerTag") or "").strip(),
         }, ""
 
@@ -1951,19 +2030,8 @@ class StartGGMatchPlugin(Star):
         if err or not user_info:
             return error_response(err or "未找到 start.gg 用户。", status_code=400)
         operator = request.username or "webui"
-        record = {
-            "qq_id": qq_id,
-            "startgg_code": user_info["startgg_code"],
-            "startgg_user_id": str(user_info["startgg_user_id"]),
-            "startgg_player_id": (
-                str(user_info["startgg_player_id"])
-                if user_info.get("startgg_player_id")
-                else ""
-            ),
-            "gamer_tag": user_info.get("gamer_tag") or "",
-            "linked_at": _now_ts(),
-            "linked_by": operator,
-        }
+        existing = self.store.get_account_links().get(qq_id)
+        record = self._build_account_link_record(qq_id, user_info, operator, existing=existing)
         self.store.set_account_link(qq_id, record)
         self.store.append_audit(
             {
@@ -1972,10 +2040,37 @@ class StartGGMatchPlugin(Star):
                 "qq_id": qq_id,
                 "startgg_code": record["startgg_code"],
                 "startgg_user_id": record["startgg_user_id"],
+                "prefix": record.get("prefix"),
+                "gamer_tag": record.get("gamer_tag"),
                 "at": _now_ts(),
             }
         )
         return json_response({"ok": True, "item": self._serialize_account_link(record)})
+
+    async def web_refresh_account_link(self):
+        payload = await request.json(default={})
+        qq_id = str(payload.get("qq_id") or "").strip()
+        if not qq_id:
+            return error_response("缺少 QQ 号 qq_id。", status_code=400)
+        record = self.store.get_account_links().get(qq_id)
+        if not record:
+            return error_response(f"未找到 QQ 号 {qq_id} 的关联记录。", status_code=404)
+        updated, err = await self._refresh_account_link_profile(record)
+        if err or not updated:
+            return error_response(err or "刷新失败。", status_code=400)
+        self.store.set_account_link(qq_id, updated)
+        operator = request.username or "webui"
+        self.store.append_audit(
+            {
+                "kind": "refresh_startgg_account_profile",
+                "operator": operator,
+                "qq_id": qq_id,
+                "prefix": updated.get("prefix"),
+                "gamer_tag": updated.get("gamer_tag"),
+                "at": _now_ts(),
+            }
+        )
+        return json_response({"ok": True, "item": self._serialize_account_link(updated)})
 
     async def web_delete_account_link(self, qq_id: str):
         return await self._delete_account_link_impl(qq_id)
@@ -2205,6 +2300,7 @@ class StartGGMatchPlugin(Star):
             "报分": self._handle_report,
             "添加管理员": self._handle_add_admin,
             "关联": self._handle_link_startgg_account,
+            "解除关联": self._handle_unlink_startgg_account,
         }
         handler = handlers.get(cmd)
         if not handler:
@@ -2230,8 +2326,8 @@ class StartGGMatchPlugin(Star):
             "@机器人 赛事详情 <简码>",
             "@机器人 切换 <赛事简码>",
             "@机器人 绑定 <entrantId>",
-            "@机器人 我在哪",
-            "@机器人 查询 [用户名]（省略时群聊用群名片匹配；已结束显示比分）",
+            "@机器人 我在哪（已关联 start.gg 账号时按关联身份查询；否则按群名片/昵称）",
+            "@机器人 查询 [用户名]（省略时同上；指定用户名则按名称查询）",
             "@机器人 set <setId>",
             "@机器人 报分 <选手局数>-<对手局数> [setId]（已关联 start.gg 账号时按关联身份报分；否则按群名片/昵称匹配）",
             "@机器人 报分 <选手名> <选手局数>-<对手局数> [setId]（管理员代报）",
@@ -2239,6 +2335,7 @@ class StartGGMatchPlugin(Star):
             "@机器人 报分状态 [赛事简码]",
             "@机器人 添加管理员 @用户（管理员，写入动态管理员列表）",
             "@机器人 关联 <start.gg唯一代码或链接>（绑定你的 QQ 与 start.gg 账号）",
+            "@机器人 解除关联（解除你的 QQ 与 start.gg 账号绑定）",
         ]
 
     def _build_help_forward_nodes(self, event: AstrMessageEvent) -> Comp.Nodes:
@@ -2634,19 +2731,8 @@ class StartGGMatchPlugin(Star):
             yield event.plain_result(err or "未找到 start.gg 用户。")
             return
         qq_id = self._sender_id(event)
-        record = {
-            "qq_id": qq_id,
-            "startgg_code": user_info["startgg_code"],
-            "startgg_user_id": str(user_info["startgg_user_id"]),
-            "startgg_player_id": (
-                str(user_info["startgg_player_id"])
-                if user_info.get("startgg_player_id")
-                else ""
-            ),
-            "gamer_tag": user_info.get("gamer_tag") or "",
-            "linked_at": _now_ts(),
-            "linked_by": qq_id,
-        }
+        existing = self.store.get_account_links().get(qq_id)
+        record = self._build_account_link_record(qq_id, user_info, qq_id, existing=existing)
         self.store.set_account_link(qq_id, record)
         self.store.append_audit(
             {
@@ -2655,16 +2741,50 @@ class StartGGMatchPlugin(Star):
                 "qq_id": qq_id,
                 "startgg_code": record["startgg_code"],
                 "startgg_user_id": record["startgg_user_id"],
+                "prefix": record.get("prefix"),
+                "gamer_tag": record.get("gamer_tag"),
                 "at": _now_ts(),
             }
         )
         gamer_tag = record["gamer_tag"] or "（未设置选手名）"
+        prefix = record.get("prefix") or ""
+        prefix_line = f"前缀: {prefix}\n" if prefix else ""
         yield event.plain_result(
             "start.gg 账号关联成功。\n"
             f"QQ: {qq_id}\n"
             f"唯一代码: {record['startgg_code']}\n"
             f"start.gg 用户 ID: {record['startgg_user_id']}\n"
+            f"{prefix_line}"
             f"选手名: {gamer_tag}"
+        )
+
+    async def _handle_unlink_startgg_account(self, event: AstrMessageEvent, _args: str):
+        qq_id = self._sender_id(event)
+        link = self.store.get_account_links().get(qq_id)
+        if not link:
+            yield event.plain_result("你尚未关联 start.gg 账号。")
+            return
+        if not self.store.delete_account_link(qq_id):
+            yield event.plain_result("解除关联失败，请稍后重试。")
+            return
+        self.store.append_audit(
+            {
+                "kind": "unlink_startgg_account_self",
+                "operator": qq_id,
+                "qq_id": qq_id,
+                "startgg_code": link.get("startgg_code"),
+                "startgg_user_id": link.get("startgg_user_id"),
+                "at": _now_ts(),
+            }
+        )
+        label = (
+            str(link.get("gamer_tag") or "").strip()
+            or str(link.get("startgg_code") or "").strip()
+            or "关联账号"
+        )
+        yield event.plain_result(
+            f"已解除 start.gg 账号关联（{label}）。\n"
+            "「我在哪」「查询」「报分」将恢复为群名片/昵称匹配。"
         )
 
     async def _handle_tournament_detail(self, event: AstrMessageEvent, args: str):

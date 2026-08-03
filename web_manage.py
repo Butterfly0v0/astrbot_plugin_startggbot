@@ -26,6 +26,7 @@ def register_web_apis(plugin: "StartGGMatchPlugin") -> None:
         ("account-links", plugin.web_list_account_links, ["GET"], "List account links"),
         ("account-links", plugin.web_add_account_link, ["POST"], "Add account link"),
         ("account-links/remove", plugin.web_delete_account_link_post, ["POST"], "Remove account link"),
+        ("account-links/refresh", plugin.web_refresh_account_link, ["POST"], "Refresh account link profile"),
         ("account-links/export", plugin.web_export_account_links, ["GET"], "Export account links"),
     ]
     for path, handler, methods, desc in routes:
@@ -68,7 +69,7 @@ def format_account_links_txt(rows: List[Dict[str, Any]]) -> str:
     if not rows:
         return "暂无已关联账号。\n"
     lines = [
-        "QQ号\tstart.gg唯一代码\tstart.gg用户ID\tstart.gg选手ID\t选手名\t关联时间",
+        "QQ号\tstart.gg唯一代码\tstart.gg用户ID\tstart.gg选手ID\t前缀\t选手名\t关联时间",
     ]
     for row in rows:
         lines.append(
@@ -78,6 +79,7 @@ def format_account_links_txt(rows: List[Dict[str, Any]]) -> str:
                     str(row.get("startgg_code", "")),
                     str(row.get("startgg_user_id", "")),
                     str(row.get("startgg_player_id", "") or ""),
+                    str(row.get("prefix", "") or ""),
                     str(row.get("gamer_tag", "") or ""),
                     str(row.get("linked_at_text", "")),
                 ]
@@ -95,6 +97,7 @@ def format_account_links_csv(rows: List[Dict[str, Any]]) -> str:
             "startgg_code",
             "startgg_user_id",
             "startgg_player_id",
+            "prefix",
             "gamer_tag",
             "linked_at",
         ]
@@ -106,6 +109,7 @@ def format_account_links_csv(rows: List[Dict[str, Any]]) -> str:
                 row.get("startgg_code", ""),
                 row.get("startgg_user_id", ""),
                 row.get("startgg_player_id", ""),
+                row.get("prefix", ""),
                 row.get("gamer_tag", ""),
                 row.get("linked_at", ""),
             ]

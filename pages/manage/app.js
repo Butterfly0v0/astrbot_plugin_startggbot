@@ -54,7 +54,7 @@ function renderTournaments(data) {
 function renderLinks(items) {
   if (!items.length) {
     linkRows.innerHTML =
-      '<tr><td colspan="7" class="empty">暂无已关联账号</td></tr>';
+      '<tr><td colspan="8" class="empty">暂无已关联账号</td></tr>';
     return;
   }
   linkRows.innerHTML = items
@@ -65,9 +65,11 @@ function renderLinks(items) {
         <td>${escapeHtml(item.startgg_code)}</td>
         <td>${escapeHtml(item.startgg_user_id)}</td>
         <td>${escapeHtml(item.startgg_player_id || "-")}</td>
+        <td>${escapeHtml(item.prefix || "-")}</td>
         <td>${escapeHtml(item.gamer_tag || "-")}</td>
         <td>${escapeHtml(item.linked_at_text || "-")}</td>
         <td class="actions">
+          <button type="button" class="btn secondary small" data-action="refresh-link" data-qq="${escapeHtml(item.qq_id)}">更新选手信息</button>
           <button type="button" class="btn danger small" data-action="delete-link" data-qq="${escapeHtml(item.qq_id)}">删除</button>
         </td>
       </tr>`
@@ -131,6 +133,12 @@ async function addLink() {
   await loadLinks();
 }
 
+async function refreshLink(qq_id) {
+  await bridge.apiPost("account-links/refresh", { qq_id });
+  setStatus(`已更新 QQ ${qq_id} 的选手名与前缀。`, "ok");
+  await loadLinks();
+}
+
 async function deleteLink(qq_id) {
   if (!window.confirm(`确定删除 QQ ${qq_id} 的关联吗？`)) return;
   await bridge.apiPost("account-links/remove", { qq_id });
@@ -163,12 +171,16 @@ tournamentRows.addEventListener("click", async (event) => {
 });
 
 linkRows.addEventListener("click", async (event) => {
-  const btn = event.target.closest("button[data-action='delete-link']");
+  const btn = event.target.closest("button[data-action]");
   if (!btn) return;
   try {
-    await deleteLink(btn.dataset.qq);
+    if (btn.dataset.action === "refresh-link") {
+      await refreshLink(btn.dataset.qq);
+    } else if (btn.dataset.action === "delete-link") {
+      await deleteLink(btn.dataset.qq);
+    }
   } catch (error) {
-    setStatus(error.message || "删除失败。", "err");
+    setStatus(error.message || "操作失败。", "err");
   }
 });
 
