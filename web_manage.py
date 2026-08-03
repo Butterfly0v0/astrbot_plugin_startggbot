@@ -16,6 +16,8 @@ PLUGIN_ROUTE = "astrbot_plugin_startggbot"
 
 
 def register_web_apis(plugin: "StartGGMatchPlugin") -> None:
+    if not hasattr(plugin.context, "register_web_api"):
+        return
     routes = [
         ("tournaments", plugin.web_list_tournaments, ["GET"], "List bound tournaments"),
         ("tournaments/bind", plugin.web_bind_tournament, ["POST"], "Bind tournament"),

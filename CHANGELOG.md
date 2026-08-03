@@ -4,6 +4,13 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.1] - 2026-06-08
+
+### Fixed
+
+- 修复插件加载失败：不再在 import 阶段硬依赖 `astrbot.api.web`；v0.2.0 在部分环境下会直接报 `No module named 'astrbot.api.web'`
+- 启动时记录 WebUI API 后端类型，便于排查 AstrBot 本体是否包含 `astrbot.api.web`
+
 ## [v0.2.0] - 2026-06-08
 
 ### Added

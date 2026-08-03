@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -14,7 +15,16 @@ import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
-from astrbot.api.web import error_response, file_response, json_response, request
+
+from web_compat import (
+    error_response,
+    file_response,
+    json_response,
+    request,
+    web_api_backend_name,
+    web_api_import_error,
+    web_api_supported,
+)
 
 from web_manage import (
     format_account_links_csv,
@@ -22,6 +32,8 @@ from web_manage import (
     normalize_startgg_user_code,
     register_web_apis,
 )
+
+logger = logging.getLogger("astrbot_plugin_startggbot")
 
 
 STARTGG_ENDPOINT = "https://api.start.gg/gql/alpha"
@@ -281,7 +293,7 @@ class GGStore:
         return True
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.0")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.1")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -309,7 +321,19 @@ class StartGGMatchPlugin(Star):
         self.config_admin_qq_ids = self._parse_qq_id_list(admin_raw)
         self.dynamic_admin_qq_ids: set = set()
         self._reload_dynamic_admin_qq_ids()
-        register_web_apis(self)
+        if web_api_supported() and hasattr(self.context, "register_web_api"):
+            register_web_apis(self)
+            logger.info(
+                "WebUI 管理页 API 已注册（backend=%s）。",
+                web_api_backend_name(),
+            )
+        elif hasattr(self.context, "register_web_api"):
+            logger.warning(
+                "WebUI 管理页 API 未启用（backend=%s，import=%s）。"
+                "聊天指令仍可用；请确认 AstrBot 本体已更新并重载插件。",
+                web_api_backend_name(),
+                web_api_import_error() or "unknown",
+            )
 
     def _load_legacy_config(self) -> Dict[str, Any]:
         possible_files = [

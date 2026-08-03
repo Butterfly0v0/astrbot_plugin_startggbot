@@ -4,6 +4,12 @@ AstrBot 插件：查询 [start.gg](https://www.start.gg) 对阵并支持自助�
 
 > [!NOTE]
 > 本仓库为 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 插件。安装后请在 WebUI 中配置 `startgg_api_token`，勿将真实 Token 提交到仓库。
+>
+> **WebUI 管理页**需要 AstrBot **v4.26.8+**（含 `astrbot.api.web` 与 Plugin Pages）。请使用插件 **v0.2.1+**（v0.2.0 加载时会因 import 失败而无法启动）。
+>
+> 若仍报错，请在 **AstrBot 实际运行的 Python 环境**中执行诊断：
+> `python -c "import importlib; importlib.import_module('astrbot.api.web'); print('ok')"`
+> 若此处失败，说明 AstrBot 本体未更新完整，而非插件版本问题。
 
 ## Supports
 
