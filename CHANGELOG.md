@@ -4,6 +4,12 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.2] - 2026-06-08
+
+### Fixed
+
+- 修复 AstrBot 包路径加载插件时找不到 `web_compat` / `web_manage` 的问题（改为基于 `__file__` 显式加载同目录模块）
+
 ## [v0.2.1] - 2026-06-08
 
 ### Fixed

@@ -1,8 +1,10 @@
 import asyncio
+import importlib.util
 import json
 import logging
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -16,22 +18,41 @@ from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
-from web_compat import (
-    error_response,
-    file_response,
-    json_response,
-    request,
-    web_api_backend_name,
-    web_api_import_error,
-    web_api_supported,
-)
+_PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+if _PLUGIN_DIR not in sys.path:
+    sys.path.insert(0, _PLUGIN_DIR)
 
-from web_manage import (
-    format_account_links_csv,
-    format_account_links_txt,
-    normalize_startgg_user_code,
-    register_web_apis,
-)
+
+def _load_local_module(module_name: str):
+    """AstrBot 以包路径加载 main 时，同目录模块需显式加载。"""
+    module_path = os.path.join(_PLUGIN_DIR, f"{module_name}.py")
+    if not os.path.isfile(module_path):
+        raise ImportError(f"缺少插件模块文件: {module_path}")
+    spec = importlib.util.spec_from_file_location(
+        f"astrbot_plugin_startggbot.{module_name}",
+        module_path,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载插件模块: {module_name}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_web_compat = _load_local_module("web_compat")
+_web_manage = _load_local_module("web_manage")
+
+error_response = _web_compat.error_response
+file_response = _web_compat.file_response
+json_response = _web_compat.json_response
+request = _web_compat.request
+web_api_backend_name = _web_compat.web_api_backend_name
+web_api_import_error = _web_compat.web_api_import_error
+web_api_supported = _web_compat.web_api_supported
+format_account_links_csv = _web_manage.format_account_links_csv
+format_account_links_txt = _web_manage.format_account_links_txt
+normalize_startgg_user_code = _web_manage.normalize_startgg_user_code
+register_web_apis = _web_manage.register_web_apis
 
 logger = logging.getLogger("astrbot_plugin_startggbot")
 
@@ -293,7 +314,7 @@ class GGStore:
         return True
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.1")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.2")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
