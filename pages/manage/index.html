@@ -19,6 +19,20 @@
           <button type="button" class="btn secondary" id="btn-refresh-tournaments">刷新</button>
         </div>
         <p class="hint" id="active-tournament-hint">当前赛事：加载中…</p>
+
+        <div class="form-block switch-block">
+          <h3>切换当前赛事</h3>
+          <div class="switch-row">
+            <label class="switch-label">
+              选择赛事
+              <select id="active-tournament-select">
+                <option value="">加载中…</option>
+              </select>
+            </label>
+            <button type="button" class="btn primary" id="btn-set-active-tournament">设为当前赛事</button>
+          </div>
+        </div>
+
         <div class="table-wrap">
           <table>
             <thead>
@@ -99,6 +113,31 @@
             </label>
           </div>
           <button type="button" class="btn primary" id="btn-add-link">添加关联</button>
+        </div>
+      </section>
+
+      <section class="card" id="section-backups">
+        <div class="card-header">
+          <h2>数据备份</h2>
+          <button type="button" class="btn primary" id="btn-create-backup">立即备份</button>
+        </div>
+        <p class="hint" id="data-dir-hint">数据目录：加载中…</p>
+        <p class="hint">建议在 AstrBot 或插件大版本更新前手动备份。备份包含赛事绑定、账号关联、报分开关等运行时数据。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>备份 ID</th>
+                <th>创建时间</th>
+                <th>文件数</th>
+                <th>操作者</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="backup-rows">
+              <tr><td colspan="5" class="empty">加载中…</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
 

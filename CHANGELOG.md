@@ -4,6 +4,23 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.6] - 2026-06-08
+
+### Added
+
+- 管理页「数据备份」：手动创建备份、查看历史、下载 ZIP、从备份恢复（适用于 AstrBot 或插件大版本更新前）
+- Web API：`data/backups`、`data/backups/create`、`data/backups/download`、`data/backups/restore`
+
+## [v0.2.5] - 2026-06-08
+
+### Added
+
+- 管理页新增「切换当前赛事」下拉框与「设为当前赛事」按钮
+
+### Changed
+
+- 运行时数据迁移至 AstrBot `data/plugin_data/astrbot_plugin_startggbot/`，插件更新后保留赛事绑定与账号关联；首次启动自动从旧版插件目录 `data/` 迁移
+
 ## [v0.2.4] - 2026-06-08
 
 ### Added

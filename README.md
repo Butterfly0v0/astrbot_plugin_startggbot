@@ -61,10 +61,11 @@ AstrBot 插件：查询 [start.gg](https://www.start.gg) 对阵并支持自助�
 
 在 AstrBot 插件详情页打开 **manage / 赛事与账号管理**：
 
-- 查看已绑定赛事，绑定新赛事（eventId 或 start.gg 链接），解绑，切换当前赛事
+- 查看已绑定赛事，绑定新赛事（eventId 或 start.gg 链接），解绑，通过下拉框或列表切换当前赛事
 - 管理 QQ 与 start.gg 账号关联（唯一代码、用户 ID），并导出 TXT / CSV / JSON
+- **数据备份**：更新 AstrBot 或插件前手动备份，支持下载 ZIP 与从历史备份恢复
 
-关联数据保存在 `data/account_links.json`；全局当前赛事保存在 `data/settings.json`。
+关联数据保存在 AstrBot 的 `data/plugin_data/astrbot_plugin_startggbot/`（全局当前赛事为其中的 `settings.json`）。插件更新后会保留；若从旧版升级，首次启动会自动从插件目录内 `data/` 迁移。建议在重大更新前在管理页创建备份。
 
 ### 绑定 start.gg 账号
 
@@ -180,7 +181,7 @@ start.gg 个人主页 URL 中的用户标识，例如：
 
 ## 数据文件
 
-插件运行后在插件目录下自动创建 `data/`（已 gitignore）：
+插件运行后在 AstrBot 的 `data/plugin_data/astrbot_plugin_startggbot/` 下持久化（不在插件目录内，更新插件不会丢失）：
 
 - `bindings.json`：手动绑定
 - `tournaments.json`：动态绑定赛事
@@ -189,6 +190,7 @@ start.gg 个人主页 URL 中的用户标识，例如：
 - `report_switch.json`：报分开关
 - `admin_qq_ids.json`：动态管理员
 - `audit_log.jsonl`：审计日志
+- `backups/`：手动备份快照（含 `manifest.json` 与各数据文件副本）
 
 ## 注意事项
 

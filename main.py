@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 import time
 import urllib.error
@@ -53,12 +54,92 @@ format_account_links_csv = _web_manage.format_account_links_csv
 format_account_links_txt = _web_manage.format_account_links_txt
 normalize_startgg_user_code = _web_manage.normalize_startgg_user_code
 register_web_apis = _web_manage.register_web_apis
+_data_backup = _load_local_module("data_backup")
+create_data_backup = _data_backup.create_backup
+list_data_backups = _data_backup.list_backups
+restore_data_backup = _data_backup.restore_backup
+build_backup_zip = _data_backup.build_backup_zip
 
 logger = logging.getLogger("astrbot_plugin_startggbot")
 
+PLUGIN_NAME = "astrbot_plugin_startggbot"
+LEGACY_DATA_DIR = os.path.join(_PLUGIN_DIR, "data")
+_PERSISTENT_DATA_FILES = (
+    "bindings.json",
+    "tournaments.json",
+    "account_links.json",
+    "settings.json",
+    "report_switch.json",
+    "admin_qq_ids.json",
+    "audit_log.jsonl",
+)
+
+
+def _ensure_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
+def _resolve_plugin_data_dir() -> str:
+    """持久化到 AstrBot plugin_data，避免插件更新覆盖插件目录内 data/。"""
+    persistent_dir = LEGACY_DATA_DIR
+    try:
+        from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
+
+        persistent_dir = os.path.join(get_astrbot_plugin_data_path(), PLUGIN_NAME)
+    except ImportError:
+        try:
+            from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+
+            persistent_dir = os.path.join(
+                get_astrbot_data_path(), "plugin_data", PLUGIN_NAME
+            )
+        except ImportError:
+            logger.warning(
+                "无法获取 AstrBot plugin_data 路径，回退到插件目录 data/。"
+            )
+
+    _ensure_dir(persistent_dir)
+    if os.path.normpath(persistent_dir) != os.path.normpath(LEGACY_DATA_DIR):
+        _migrate_legacy_data_dir(LEGACY_DATA_DIR, persistent_dir)
+    return persistent_dir
+
+
+def _migrate_legacy_data_dir(legacy_dir: str, new_dir: str) -> None:
+    if not os.path.isdir(legacy_dir):
+        return
+    migrated: List[str] = []
+    for name in _PERSISTENT_DATA_FILES:
+        src = os.path.join(legacy_dir, name)
+        dst = os.path.join(new_dir, name)
+        if not os.path.exists(src):
+            continue
+        if os.path.exists(dst):
+            if name.endswith(".json"):
+                try:
+                    with open(dst, "r", encoding="utf-8") as f:
+                        current = json.load(f)
+                    if current:
+                        continue
+                except Exception:
+                    pass
+            else:
+                continue
+        _ensure_dir(os.path.dirname(dst))
+        shutil.copy2(src, dst)
+        migrated.append(name)
+    legacy_exports = os.path.join(legacy_dir, "exports")
+    new_exports = os.path.join(new_dir, "exports")
+    if os.path.isdir(legacy_exports) and not os.path.isdir(new_exports):
+        shutil.copytree(legacy_exports, new_exports)
+    if migrated:
+        logger.info(
+            "已从插件目录 data/ 迁移数据到 plugin_data：%s",
+            ", ".join(migrated),
+        )
+
 
 STARTGG_ENDPOINT = "https://api.start.gg/gql/alpha"
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+DATA_DIR = _resolve_plugin_data_dir()
 BINDINGS_FILE = os.path.join(DATA_DIR, "bindings.json")
 REPORT_SWITCH_FILE = os.path.join(DATA_DIR, "report_switch.json")
 TOURNAMENTS_FILE = os.path.join(DATA_DIR, "tournaments.json")
@@ -140,10 +221,6 @@ def _gql_id(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
-
-
-def _ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
 
 
 def _read_json(path: str, default_value: Any) -> Any:
@@ -315,7 +392,7 @@ class GGStore:
         return True
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.4")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.6")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -2118,6 +2195,83 @@ class StartGGMatchPlugin(Star):
         with open(export_path, "w", encoding="utf-8") as f:
             f.write(content)
         return file_response(export_path, filename=filename, content_type=content_type)
+
+    async def web_list_data_backups(self):
+        rows = list_data_backups(DATA_DIR)
+        for row in rows:
+            row["created_at_text"] = self._format_ts_text(row.get("created_at"))
+        return json_response({"items": rows, "dataDir": DATA_DIR})
+
+    async def web_create_data_backup(self):
+        operator = request.username or "webui"
+        try:
+            backup = create_data_backup(
+                DATA_DIR,
+                _PERSISTENT_DATA_FILES,
+                operator=operator,
+                plugin_version="0.2.6",
+            )
+        except ValueError as e:
+            return error_response(str(e), status_code=400)
+        backup["created_at_text"] = self._format_ts_text(backup.get("created_at"))
+        self.store.append_audit(
+            {
+                "kind": "data_backup_create",
+                "operator": operator,
+                "backupId": backup.get("id"),
+                "fileCount": backup.get("file_count"),
+                "at": _now_ts(),
+            }
+        )
+        return json_response({"ok": True, "backup": backup, "dataDir": DATA_DIR})
+
+    async def web_restore_data_backup(self):
+        payload = await request.json(default={})
+        backup_id = str(payload.get("backup_id") or payload.get("id") or "").strip()
+        if not backup_id:
+            return error_response("缺少 backup_id。", status_code=400)
+        try:
+            restored, err = restore_data_backup(DATA_DIR, backup_id, _PERSISTENT_DATA_FILES)
+        except ValueError as e:
+            return error_response(str(e), status_code=400)
+        if err:
+            return error_response(err, status_code=404)
+        self._sync_tournaments_from_store()
+        operator = request.username or "webui"
+        self.store.append_audit(
+            {
+                "kind": "data_backup_restore",
+                "operator": operator,
+                "backupId": backup_id,
+                "restored": restored,
+                "at": _now_ts(),
+            }
+        )
+        return json_response(
+            {
+                "ok": True,
+                "backup_id": backup_id,
+                "restored": restored,
+            }
+        )
+
+    async def web_download_data_backup(self):
+        backup_id = str(
+            request.query.get("backup_id") or request.query.get("id") or ""
+        ).strip()
+        if not backup_id:
+            return error_response("缺少 backup_id。", status_code=400)
+        try:
+            zip_path, err = build_backup_zip(DATA_DIR, backup_id)
+        except ValueError as e:
+            return error_response(str(e), status_code=400)
+        if err or not zip_path:
+            return error_response(err or "备份不存在。", status_code=404)
+        return file_response(
+            zip_path,
+            filename=f"startggbot-backup-{backup_id}.zip",
+            content_type="application/zip",
+        )
 
     async def _query_entrant_match(
         self, event: AstrMessageEvent, entrant_id: int, query_target: str

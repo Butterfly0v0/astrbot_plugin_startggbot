@@ -195,6 +195,32 @@ input {
   color: var(--text);
 }
 
+select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  min-width: 220px;
+}
+
+.switch-block {
+  border-top: none;
+  padding-top: 0;
+  margin-bottom: 16px;
+}
+
+.switch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.switch-label {
+  flex: 1 1 240px;
+}
+
 .status {
   min-height: 1.25rem;
   font-size: 0.875rem;

@@ -28,6 +28,10 @@ def register_web_apis(plugin: "StartGGMatchPlugin") -> None:
         ("account-links/remove", plugin.web_delete_account_link_post, ["POST"], "Remove account link"),
         ("account-links/refresh", plugin.web_refresh_account_link, ["POST"], "Refresh account link profile"),
         ("account-links/export", plugin.web_export_account_links, ["GET"], "Export account links"),
+        ("data/backups", plugin.web_list_data_backups, ["GET"], "List data backups"),
+        ("data/backups/create", plugin.web_create_data_backup, ["POST"], "Create data backup"),
+        ("data/backups/restore", plugin.web_restore_data_backup, ["POST"], "Restore data backup"),
+        ("data/backups/download", plugin.web_download_data_backup, ["GET"], "Download data backup"),
     ]
     for path, handler, methods, desc in routes:
         plugin.context.register_web_api(

@@ -2,7 +2,10 @@ const bridge = window.AstrBotPluginPage;
 const statusEl = document.getElementById("status");
 const tournamentRows = document.getElementById("tournament-rows");
 const linkRows = document.getElementById("link-rows");
+const backupRows = document.getElementById("backup-rows");
+const dataDirHint = document.getElementById("data-dir-hint");
 const activeHint = document.getElementById("active-tournament-hint");
+const activeSelect = document.getElementById("active-tournament-select");
 
 function setStatus(message, type = "") {
   statusEl.textContent = message || "";
@@ -17,9 +20,29 @@ function escapeHtml(text) {
     .replaceAll('"', "&quot;");
 }
 
+function renderTournamentSelect(items, activeCode) {
+  if (!items.length) {
+    activeSelect.innerHTML = '<option value="">暂无已绑定赛事</option>';
+    activeSelect.disabled = true;
+    return;
+  }
+  activeSelect.disabled = false;
+  activeSelect.innerHTML = items
+    .map((item) => {
+      const label = `${item.code} — ${item.name}`;
+      const selected = item.code === activeCode ? " selected" : "";
+      return `<option value="${escapeHtml(item.code)}"${selected}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+  if (activeCode && !items.some((item) => item.code === activeCode)) {
+    activeSelect.value = items[0].code;
+  }
+}
+
 function renderTournaments(data) {
   const items = data?.items || [];
   const activeCode = data?.activeCode || "";
+  renderTournamentSelect(items, activeCode);
   if (!items.length) {
     tournamentRows.innerHTML =
       '<tr><td colspan="5" class="empty">暂无已绑定赛事</td></tr>';
@@ -87,6 +110,67 @@ async function loadLinks() {
   renderLinks(data?.items || []);
 }
 
+function renderBackups(data) {
+  const items = data?.items || [];
+  if (data?.dataDir) {
+    dataDirHint.textContent = `数据目录：${data.dataDir}`;
+  }
+  if (!items.length) {
+    backupRows.innerHTML =
+      '<tr><td colspan="5" class="empty">暂无备份，建议更新前点击「立即备份」</td></tr>';
+    return;
+  }
+  backupRows.innerHTML = items
+    .map(
+      (item) => `
+      <tr>
+        <td>${escapeHtml(item.id)}</td>
+        <td>${escapeHtml(item.created_at_text || "-")}</td>
+        <td>${escapeHtml(item.file_count ?? 0)}</td>
+        <td>${escapeHtml(item.operator || "-")}</td>
+        <td class="actions">
+          <button type="button" class="btn secondary small" data-action="download-backup" data-id="${escapeHtml(item.id)}">下载</button>
+          <button type="button" class="btn danger small" data-action="restore-backup" data-id="${escapeHtml(item.id)}">恢复</button>
+        </td>
+      </tr>`
+    )
+    .join("");
+}
+
+async function loadBackups() {
+  const data = await bridge.apiGet("data/backups");
+  renderBackups(data);
+}
+
+async function createBackup() {
+  const data = await bridge.apiPost("data/backups/create", {});
+  setStatus(`备份已创建：${data?.backup?.id || ""}`, "ok");
+  await loadBackups();
+}
+
+async function restoreBackup(backupId) {
+  if (
+    !window.confirm(
+      `确定从备份「${backupId}」恢复数据吗？\n当前运行时数据将被覆盖（赛事绑定、账号关联、报分开关等）。`
+    )
+  ) {
+    return;
+  }
+  const data = await bridge.apiPost("data/backups/restore", { backup_id: backupId });
+  const restored = (data?.restored || []).join(", ") || "无";
+  setStatus(`已从备份 ${backupId} 恢复：${restored}`, "ok");
+  await Promise.all([loadTournaments(), loadLinks(), loadBackups()]);
+}
+
+async function downloadBackup(backupId) {
+  await bridge.download(
+    "data/backups/download",
+    { backup_id: backupId },
+    `startggbot-backup-${backupId}.zip`
+  );
+  setStatus(`已下载备份 ${backupId}。`, "ok");
+}
+
 async function bindTournament() {
   const reference = document.getElementById("bind-reference").value.trim();
   const code = document.getElementById("bind-code").value.trim();
@@ -107,9 +191,18 @@ async function bindTournament() {
 }
 
 async function activateTournament(code) {
+  if (!code) {
+    setStatus("请先选择要切换的赛事。", "err");
+    return;
+  }
   await bridge.apiPost("tournaments/active", { code });
   setStatus(`已切换当前赛事为 ${code}。`, "ok");
   await loadTournaments();
+}
+
+async function activateSelectedTournament() {
+  const code = activeSelect.value.trim();
+  await activateTournament(code);
 }
 
 async function unbindTournament(code) {
@@ -184,6 +277,24 @@ linkRows.addEventListener("click", async (event) => {
   }
 });
 
+backupRows.addEventListener("click", async (event) => {
+  const btn = event.target.closest("button[data-action]");
+  if (!btn) return;
+  const backupId = btn.dataset.id;
+  try {
+    if (btn.dataset.action === "download-backup") {
+      await downloadBackup(backupId);
+    } else if (btn.dataset.action === "restore-backup") {
+      await restoreBackup(backupId);
+    }
+  } catch (error) {
+    setStatus(error.message || "操作失败。", "err");
+  }
+});
+
+document.getElementById("btn-set-active-tournament").addEventListener("click", () =>
+  activateSelectedTournament().catch((e) => setStatus(e.message, "err"))
+);
 document.getElementById("btn-refresh-tournaments").addEventListener("click", () =>
   loadTournaments().catch((e) => setStatus(e.message, "err"))
 );
@@ -205,13 +316,16 @@ document.getElementById("btn-export-csv").addEventListener("click", () =>
 document.getElementById("btn-export-json").addEventListener("click", () =>
   exportLinks("json").catch((e) => setStatus(e.message, "err"))
 );
+document.getElementById("btn-create-backup").addEventListener("click", () =>
+  createBackup().catch((e) => setStatus(e.message, "err"))
+);
 
 await bridge.ready();
 document.title = bridge.t("pages.manage.title", "赛事与账号管理");
 document.getElementById("page-title").textContent = document.title;
 
 try {
-  await Promise.all([loadTournaments(), loadLinks()]);
+  await Promise.all([loadTournaments(), loadLinks(), loadBackups()]);
   setStatus("就绪。");
 } catch (error) {
   setStatus(error.message || "加载失败。", "err");
