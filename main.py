@@ -394,7 +394,7 @@ class GGStore:
         return True
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.7")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.8")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -2226,7 +2226,7 @@ class StartGGMatchPlugin(Star):
                 DATA_DIR,
                 _PERSISTENT_DATA_FILES,
                 operator=operator,
-                plugin_version="0.2.7",
+                plugin_version="0.2.8",
             )
         except ValueError as e:
             return error_response(str(e), status_code=400)

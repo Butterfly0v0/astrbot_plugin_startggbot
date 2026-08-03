@@ -6,6 +6,13 @@ const backupRows = document.getElementById("backup-rows");
 const dataDirHint = document.getElementById("data-dir-hint");
 const activeHint = document.getElementById("active-tournament-hint");
 const activeSelect = document.getElementById("active-tournament-select");
+const confirmDialog = document.getElementById("confirm-dialog");
+const confirmMessage = document.getElementById("confirm-message");
+const confirmOkBtn = document.getElementById("confirm-ok");
+const confirmCancelBtn = document.getElementById("confirm-cancel");
+
+const DEFAULT_DOWNLOAD_LOCATION =
+  "系统默认下载目录（Windows 通常为「用户\\下载」，macOS 为「下载」）";
 
 function setStatus(message, type = "") {
   statusEl.textContent = message || "";
@@ -18,6 +25,45 @@ function escapeHtml(text) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function confirmAction(message) {
+  return new Promise((resolve) => {
+    confirmMessage.textContent = message;
+    confirmDialog.classList.remove("hidden");
+
+    const finish = (result) => {
+      confirmDialog.classList.add("hidden");
+      document.removeEventListener("keydown", onKeyDown);
+      confirmOkBtn.removeEventListener("click", onOk);
+      confirmCancelBtn.removeEventListener("click", onCancel);
+      confirmDialog.removeEventListener("click", onBackdropClick);
+      resolve(result);
+    };
+
+    const onOk = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        finish(false);
+      }
+    };
+    const onBackdropClick = (event) => {
+      if (event.target?.dataset?.action === "cancel") {
+        finish(false);
+      }
+    };
+
+    confirmOkBtn.addEventListener("click", onOk);
+    confirmCancelBtn.addEventListener("click", onCancel);
+    confirmDialog.addEventListener("click", onBackdropClick);
+    document.addEventListener("keydown", onKeyDown);
+    confirmCancelBtn.focus();
+  });
+}
+
+function formatDownloadStatus(filename, saveLocation) {
+  return `已保存 ${filename}，保存位置：${saveLocation}`;
 }
 
 function triggerBrowserDownload(filename, blob) {
@@ -43,8 +89,11 @@ function base64ToBlob(base64, contentType) {
 async function downloadViaBridge(endpoint, params, fallbackFilename) {
   if (typeof bridge.download === "function") {
     try {
-      await bridge.download(endpoint, params, fallbackFilename);
-      return;
+      const result = await bridge.download(endpoint, params, fallbackFilename);
+      return {
+        filename: result?.filename || fallbackFilename,
+        saveLocation: DEFAULT_DOWNLOAD_LOCATION,
+      };
     } catch (error) {
       const message = String(error?.message || "");
       if (!message.includes("Unsupported plugin bridge action")) {
@@ -65,6 +114,10 @@ async function downloadViaBridge(endpoint, params, fallbackFilename) {
     });
   }
   triggerBrowserDownload(filename, blob);
+  return {
+    filename,
+    saveLocation: DEFAULT_DOWNLOAD_LOCATION,
+  };
 }
 
 function renderTournamentSelect(items, activeCode) {
@@ -197,11 +250,10 @@ async function createBackup() {
 }
 
 async function restoreBackup(backupId) {
-  if (
-    !window.confirm(
-      `确定从备份「${backupId}」恢复数据吗？\n当前运行时数据将被覆盖（赛事绑定、账号关联、报分开关等）。`
-    )
-  ) {
+  const confirmed = await confirmAction(
+    `确定从备份「${backupId}」恢复数据吗？\n当前运行时数据将被覆盖（赛事绑定、账号关联、报分开关等）。`
+  );
+  if (!confirmed) {
     return;
   }
   const data = await bridge.apiPost("data/backups/restore", { backup_id: backupId });
@@ -211,20 +263,19 @@ async function restoreBackup(backupId) {
 }
 
 async function downloadBackup(backupId) {
-  await downloadViaBridge(
+  const { filename, saveLocation } = await downloadViaBridge(
     "data/backups/download",
     { backup_id: backupId },
     `startggbot-backup-${backupId}.zip`
   );
-  setStatus(`已下载备份 ${backupId}。`, "ok");
+  setStatus(formatDownloadStatus(filename, saveLocation), "ok");
 }
 
 async function deleteBackup(backupId) {
-  if (
-    !window.confirm(
-      `确定删除备份「${backupId}」吗？\n此操作不可撤销，备份文件将被永久删除。`
-    )
-  ) {
+  const confirmed = await confirmAction(
+    `确定删除备份「${backupId}」吗？\n此操作不可撤销，备份文件将被永久删除。`
+  );
+  if (!confirmed) {
     return;
   }
   await bridge.apiPost("data/backups/delete", { backup_id: backupId });
@@ -267,7 +318,8 @@ async function activateSelectedTournament() {
 }
 
 async function unbindTournament(code) {
-  if (!window.confirm(`确定解绑赛事「${code}」吗？`)) return;
+  const confirmed = await confirmAction(`确定解绑赛事「${code}」吗？`);
+  if (!confirmed) return;
   await bridge.apiPost("tournaments/unbind", { code });
   setStatus(`已解绑赛事 ${code}。`, "ok");
   await loadTournaments();
@@ -294,19 +346,20 @@ async function refreshLink(qq_id) {
 }
 
 async function deleteLink(qq_id) {
-  if (!window.confirm(`确定删除 QQ ${qq_id} 的关联吗？`)) return;
+  const confirmed = await confirmAction(`确定删除 QQ ${qq_id} 的关联吗？`);
+  if (!confirmed) return;
   await bridge.apiPost("account-links/remove", { qq_id });
   setStatus(`已删除 QQ ${qq_id} 的关联。`, "ok");
   await loadLinks();
 }
 
 async function exportLinks(format) {
-  await downloadViaBridge(
+  const { filename, saveLocation } = await downloadViaBridge(
     "account-links/export",
     { format },
     `startgg_account_links.${format}`
   );
-  setStatus(`已导出 ${format.toUpperCase()} 文件。`, "ok");
+  setStatus(formatDownloadStatus(filename, saveLocation), "ok");
 }
 
 tournamentRows.addEventListener("click", async (event) => {

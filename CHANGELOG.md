@@ -4,6 +4,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.8] - 2026-06-08
+
+### Changed
+
+- 导出/下载完成后提示文件名与保存位置（系统默认下载目录）
+
+### Fixed
+
+- 修复 AstrBot 插件页 iframe 未启用 `allow-modals` 导致 `window.confirm` 无效的问题，改为页面内自定义确认对话框
+
 ## [v0.2.7] - 2026-06-08
 
 ### Added
