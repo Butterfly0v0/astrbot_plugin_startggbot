@@ -4,6 +4,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.7] - 2026-06-08
+
+### Added
+
+- 数据备份列表新增「删除」按钮（二次确认后删除备份目录与缓存 ZIP）
+
+### Fixed
+
+- 修复部分 AstrBot 版本不支持 `bridge.download` 导致导出/下载报错的问题，改为通过 JSON 内容接口 + 浏览器本地下载
+
 ## [v0.2.6] - 2026-06-08
 
 ### Added

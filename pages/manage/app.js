@@ -20,6 +20,53 @@ function escapeHtml(text) {
     .replaceAll('"', "&quot;");
 }
 
+function triggerBrowserDownload(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function base64ToBlob(base64, contentType) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: contentType || "application/octet-stream" });
+}
+
+async function downloadViaBridge(endpoint, params, fallbackFilename) {
+  if (typeof bridge.download === "function") {
+    try {
+      await bridge.download(endpoint, params, fallbackFilename);
+      return;
+    } catch (error) {
+      const message = String(error?.message || "");
+      if (!message.includes("Unsupported plugin bridge action")) {
+        throw error;
+      }
+    }
+  }
+
+  const contentEndpoint = `${endpoint}/content`;
+  const data = await bridge.apiGet(contentEndpoint, params);
+  const filename = data?.filename || fallbackFilename;
+  let blob;
+  if (data?.contentBase64) {
+    blob = base64ToBlob(data.contentBase64, data.contentType);
+  } else {
+    blob = new Blob([data?.content ?? ""], {
+      type: data?.contentType || "text/plain;charset=utf-8",
+    });
+  }
+  triggerBrowserDownload(filename, blob);
+}
+
 function renderTournamentSelect(items, activeCode) {
   if (!items.length) {
     activeSelect.innerHTML = '<option value="">暂无已绑定赛事</option>';
@@ -131,6 +178,7 @@ function renderBackups(data) {
         <td class="actions">
           <button type="button" class="btn secondary small" data-action="download-backup" data-id="${escapeHtml(item.id)}">下载</button>
           <button type="button" class="btn danger small" data-action="restore-backup" data-id="${escapeHtml(item.id)}">恢复</button>
+          <button type="button" class="btn danger small" data-action="delete-backup" data-id="${escapeHtml(item.id)}">删除</button>
         </td>
       </tr>`
     )
@@ -163,12 +211,25 @@ async function restoreBackup(backupId) {
 }
 
 async function downloadBackup(backupId) {
-  await bridge.download(
+  await downloadViaBridge(
     "data/backups/download",
     { backup_id: backupId },
     `startggbot-backup-${backupId}.zip`
   );
   setStatus(`已下载备份 ${backupId}。`, "ok");
+}
+
+async function deleteBackup(backupId) {
+  if (
+    !window.confirm(
+      `确定删除备份「${backupId}」吗？\n此操作不可撤销，备份文件将被永久删除。`
+    )
+  ) {
+    return;
+  }
+  await bridge.apiPost("data/backups/delete", { backup_id: backupId });
+  setStatus(`已删除备份 ${backupId}。`, "ok");
+  await loadBackups();
 }
 
 async function bindTournament() {
@@ -240,7 +301,7 @@ async function deleteLink(qq_id) {
 }
 
 async function exportLinks(format) {
-  await bridge.download(
+  await downloadViaBridge(
     "account-links/export",
     { format },
     `startgg_account_links.${format}`
@@ -286,6 +347,8 @@ backupRows.addEventListener("click", async (event) => {
       await downloadBackup(backupId);
     } else if (btn.dataset.action === "restore-backup") {
       await restoreBackup(backupId);
+    } else if (btn.dataset.action === "delete-backup") {
+      await deleteBackup(backupId);
     }
   } catch (error) {
     setStatus(error.message || "操作失败。", "err");

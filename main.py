@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import importlib.util
 import json
 import logging
@@ -59,6 +60,7 @@ create_data_backup = _data_backup.create_backup
 list_data_backups = _data_backup.list_backups
 restore_data_backup = _data_backup.restore_backup
 build_backup_zip = _data_backup.build_backup_zip
+delete_data_backup = _data_backup.delete_backup
 
 logger = logging.getLogger("astrbot_plugin_startggbot")
 
@@ -392,7 +394,7 @@ class GGStore:
         return True
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.6")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.7")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -2174,15 +2176,12 @@ class StartGGMatchPlugin(Star):
         )
         return json_response({"ok": True, "qq_id": qq_id})
 
-    async def web_export_account_links(self):
-        fmt = str(request.query.get("format") or "txt").strip().lower()
+    def _build_account_links_export(self, fmt: str) -> Tuple[str, str, str]:
         rows = self._list_account_link_rows()
-        export_dir = os.path.join(DATA_DIR, "exports")
-        _ensure_dir(export_dir)
         if fmt == "json":
             content = json.dumps({"items": rows}, ensure_ascii=False, indent=2)
             filename = "startgg_account_links.json"
-            content_type = "application/json"
+            content_type = "application/json; charset=utf-8"
         elif fmt == "csv":
             content = format_account_links_csv(rows)
             filename = "startgg_account_links.csv"
@@ -2191,10 +2190,28 @@ class StartGGMatchPlugin(Star):
             content = format_account_links_txt(rows)
             filename = "startgg_account_links.txt"
             content_type = "text/plain; charset=utf-8"
+        return content, filename, content_type
+
+    async def web_export_account_links(self):
+        fmt = str(request.query.get("format") or "txt").strip().lower()
+        content, filename, content_type = self._build_account_links_export(fmt)
+        export_dir = os.path.join(DATA_DIR, "exports")
+        _ensure_dir(export_dir)
         export_path = os.path.join(export_dir, filename)
         with open(export_path, "w", encoding="utf-8") as f:
             f.write(content)
         return file_response(export_path, filename=filename, content_type=content_type)
+
+    async def web_export_account_links_content(self):
+        fmt = str(request.query.get("format") or "txt").strip().lower()
+        content, filename, content_type = self._build_account_links_export(fmt)
+        return json_response(
+            {
+                "filename": filename,
+                "content": content,
+                "contentType": content_type,
+            }
+        )
 
     async def web_list_data_backups(self):
         rows = list_data_backups(DATA_DIR)
@@ -2209,7 +2226,7 @@ class StartGGMatchPlugin(Star):
                 DATA_DIR,
                 _PERSISTENT_DATA_FILES,
                 operator=operator,
-                plugin_version="0.2.6",
+                plugin_version="0.2.7",
             )
         except ValueError as e:
             return error_response(str(e), status_code=400)
@@ -2272,6 +2289,51 @@ class StartGGMatchPlugin(Star):
             filename=f"startggbot-backup-{backup_id}.zip",
             content_type="application/zip",
         )
+
+    async def web_download_data_backup_content(self):
+        backup_id = str(
+            request.query.get("backup_id") or request.query.get("id") or ""
+        ).strip()
+        if not backup_id:
+            return error_response("缺少 backup_id。", status_code=400)
+        try:
+            zip_path, err = build_backup_zip(DATA_DIR, backup_id)
+        except ValueError as e:
+            return error_response(str(e), status_code=400)
+        if err or not zip_path:
+            return error_response(err or "备份不存在。", status_code=404)
+        with open(zip_path, "rb") as f:
+            payload = base64.b64encode(f.read()).decode("ascii")
+        filename = f"startggbot-backup-{backup_id}.zip"
+        return json_response(
+            {
+                "filename": filename,
+                "contentBase64": payload,
+                "contentType": "application/zip",
+            }
+        )
+
+    async def web_delete_data_backup(self):
+        payload = await request.json(default={})
+        backup_id = str(payload.get("backup_id") or payload.get("id") or "").strip()
+        if not backup_id:
+            return error_response("缺少 backup_id。", status_code=400)
+        try:
+            ok, err = delete_data_backup(DATA_DIR, backup_id)
+        except ValueError as e:
+            return error_response(str(e), status_code=400)
+        if not ok:
+            return error_response(err or "删除失败。", status_code=404)
+        operator = request.username or "webui"
+        self.store.append_audit(
+            {
+                "kind": "data_backup_delete",
+                "operator": operator,
+                "backupId": backup_id,
+                "at": _now_ts(),
+            }
+        )
+        return json_response({"ok": True, "backup_id": backup_id})
 
     async def _query_entrant_match(
         self, event: AstrMessageEvent, entrant_id: int, query_target: str

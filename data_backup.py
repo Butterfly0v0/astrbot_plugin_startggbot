@@ -160,3 +160,19 @@ def build_backup_zip(data_dir: str, backup_id: str) -> Tuple[Optional[str], str]
                 arcname = os.path.relpath(full_path, source_dir)
                 zf.write(full_path, arcname)
     return zip_path, ""
+
+
+def delete_backup(data_dir: str, backup_id: str) -> Tuple[bool, str]:
+    source_dir = backup_dir_for_id(data_dir, backup_id)
+    if not os.path.isdir(source_dir):
+        return False, f"备份不存在: {backup_id}"
+
+    shutil.rmtree(source_dir)
+    zip_path = os.path.join(
+        backups_root(data_dir),
+        "_downloads",
+        f"startggbot-backup-{backup_id}.zip",
+    )
+    if os.path.isfile(zip_path):
+        os.remove(zip_path)
+    return True, ""
