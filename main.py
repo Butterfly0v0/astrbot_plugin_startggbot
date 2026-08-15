@@ -2274,7 +2274,7 @@ class StartGGMatchPlugin(Star):
                 DATA_DIR,
                 _PERSISTENT_DATA_FILES,
                 operator=operator,
-                plugin_version="0.2.8",
+                plugin_version="0.2.9",
             )
         except ValueError as e:
             return error_response(str(e), status_code=400)
