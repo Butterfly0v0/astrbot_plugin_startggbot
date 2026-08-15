@@ -394,7 +394,7 @@ class GGStore:
         return True
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.8")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.9")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -809,15 +809,59 @@ class StartGGMatchPlugin(Star):
                 names.append(tag)
         return names
 
-    def _name_matches_keyword(self, entrant_names: List[str], keyword: str) -> bool:
+    def _name_match_rank(self, name: str, keyword: str) -> Optional[int]:
+        """匹配质量（数值越小越优先）。无匹配时返回 None。"""
         kw = keyword.strip().lower()
-        if not kw:
-            return False
-        for name in entrant_names:
-            nl = name.lower()
-            if nl == kw or kw in nl or nl in kw:
-                return True
-        return False
+        nl = name.strip().lower()
+        if not kw or not nl:
+            return None
+        if nl == kw:
+            return 0
+        if nl.startswith(kw):
+            return 1
+        if kw.startswith(nl):
+            return 2
+        if kw in nl:
+            return 3
+        if nl in kw:
+            return 4
+        return None
+
+    def _best_name_match_rank(self, entrant_names: List[str], keyword: str) -> Optional[int]:
+        ranks = [
+            rank
+            for name in entrant_names
+            if (rank := self._name_match_rank(name, keyword)) is not None
+        ]
+        return min(ranks) if ranks else None
+
+    def _name_matches_keyword(self, entrant_names: List[str], keyword: str) -> bool:
+        return self._best_name_match_rank(entrant_names, keyword) is not None
+
+    def _pick_best_entrant_matches(
+        self,
+        candidates: List[Tuple[int, str, List[str]]],
+        username: str,
+    ) -> Tuple[Optional[int], Optional[str], str]:
+        scored: List[Tuple[int, int, str]] = []
+        for entrant_id, display_name, names in candidates:
+            rank = self._best_name_match_rank(names, username)
+            if rank is not None:
+                scored.append((rank, entrant_id, display_name))
+
+        if not scored:
+            return None, None, f"未在当前赛事中找到用户「{username}」。"
+
+        best_rank = min(item[0] for item in scored)
+        best = [
+            (entrant_id, display_name)
+            for rank, entrant_id, display_name in scored
+            if rank == best_rank
+        ]
+        if len(best) == 1:
+            return best[0][0], best[0][1], ""
+        hints = ", ".join(name for _, name in best[:5])
+        return None, None, f"匹配到多名选手，请更精确：{hints}"
 
     async def _find_entrant_by_username(
         self,
@@ -829,7 +873,8 @@ class StartGGMatchPlugin(Star):
         if not username:
             return None, None, "用户名为空。"
 
-        matches: List[Tuple[int, str]] = []
+        candidates: List[Tuple[int, str, List[str]]] = []
+        seen_ids: set[int] = set()
 
         filter_query = """
         query FindEntrant($eventId: ID!, $name: String!) {
@@ -860,12 +905,16 @@ class StartGGMatchPlugin(Star):
         )
         for node in nodes:
             names = self._entrant_display_names(node)
-            if self._name_matches_keyword(names, username):
-                entrant_id = _safe_int(node.get("id"))
-                if entrant_id:
-                    matches.append((entrant_id, names[0] if names else username))
+            if not self._name_matches_keyword(names, username):
+                continue
+            entrant_id = _safe_int(node.get("id"))
+            if entrant_id and entrant_id not in seen_ids:
+                seen_ids.add(entrant_id)
+                candidates.append(
+                    (entrant_id, names[0] if names else username, names)
+                )
 
-        if not matches:
+        if not candidates:
             list_query = """
             query ListEntrants($eventId: ID!, $page: Int!, $perPage: Int!) {
               event(id: $eventId) {
@@ -902,17 +951,16 @@ class StartGGMatchPlugin(Star):
                     break
                 for node in page_nodes:
                     names = self._entrant_display_names(node)
-                    if self._name_matches_keyword(names, username):
-                        entrant_id = _safe_int(node.get("id"))
-                        if entrant_id and all(m[0] != entrant_id for m in matches):
-                            matches.append((entrant_id, names[0] if names else username))
+                    if not self._name_matches_keyword(names, username):
+                        continue
+                    entrant_id = _safe_int(node.get("id"))
+                    if entrant_id and entrant_id not in seen_ids:
+                        seen_ids.add(entrant_id)
+                        candidates.append(
+                            (entrant_id, names[0] if names else username, names)
+                        )
 
-        if len(matches) == 1:
-            return matches[0][0], matches[0][1], ""
-        if len(matches) > 1:
-            hints = ", ".join(name for _, name in matches[:5])
-            return None, None, f"匹配到多名选手，请更精确：{hints}"
-        return None, None, f"未在当前赛事中找到用户「{username}」。"
+        return self._pick_best_entrant_matches(candidates, username)
 
     async def _resolve_query_target(
         self, event: AstrMessageEvent, username: Optional[str] = None

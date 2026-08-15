@@ -4,6 +4,12 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.9] - 2026-06-08
+
+### Fixed
+
+- 查询选手名时优先精确匹配，避免短 ID（如 `ay`）被子串较长的同名选手（如 `ayase`）误判为多人匹配
+
 ## [v0.2.8] - 2026-06-08
 
 ### Changed
