@@ -301,6 +301,8 @@ class TournamentConfig:
     name: str
     event_id: int
     phase_group_id: Optional[int] = None
+    # start.gg event slug，如 tournament/xxx/event/yyy；供 TOP8 等插件复用简码
+    slug: Optional[str] = None
 
 
 @dataclass
@@ -308,6 +310,7 @@ class EventBindingInfo:
     event_id: int
     event_name: str
     tournament_name: str
+    slug: Optional[str] = None
 
 
 class GGStore:
@@ -394,7 +397,7 @@ class GGStore:
         return True
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.9")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.10")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -527,11 +530,18 @@ class StartGGMatchPlugin(Star):
             event_id = _safe_int(item.get("eventId"))
             if not event_id:
                 continue
+            slug_raw = item.get("slug") or item.get("eventSlug") or ""
+            slug = str(slug_raw).strip() or None
+            if slug and slug.startswith("http"):
+                parsed_link = _parse_startgg_link(slug)
+                if parsed_link and parsed_link.get("type") == "slug":
+                    slug = parsed_link["slug"]
             result[code] = TournamentConfig(
                 code=code,
                 name=str(item.get("name", code)),
                 event_id=event_id,
                 phase_group_id=_safe_int(item.get("phaseGroupId")),
+                slug=slug,
             )
         return result
 
@@ -547,12 +557,15 @@ class StartGGMatchPlugin(Star):
     def _save_tournaments(self) -> None:
         payload: Dict[str, Dict[str, Any]] = {}
         for code, t in self.tournaments.items():
-            payload[code] = {
+            entry: Dict[str, Any] = {
                 "code": t.code,
                 "name": t.name,
                 "eventId": t.event_id,
                 "phaseGroupId": t.phase_group_id,
             }
+            if t.slug:
+                entry["slug"] = t.slug
+            payload[code] = entry
         self.store.save_tournaments(payload)
 
     def _sync_tournaments_from_store(self) -> None:
@@ -1741,6 +1754,7 @@ class StartGGMatchPlugin(Star):
           event(id: $eventId) {
             id
             name
+            slug
             tournament {
               id
               name
@@ -1756,10 +1770,12 @@ class StartGGMatchPlugin(Star):
         event_name = str(event_data.get("name") or "").strip() or "未命名项目"
         tournament = event_data.get("tournament") or {}
         tournament_name = str(tournament.get("name") or "").strip() or event_name
+        slug = str(event_data.get("slug") or "").strip() or None
         return EventBindingInfo(
             event_id=eid,
             event_name=event_name,
             tournament_name=tournament_name,
+            slug=slug,
         )
 
     async def _query_event_by_slug(
@@ -1770,6 +1786,7 @@ class StartGGMatchPlugin(Star):
           event(slug: $slug) {
             id
             name
+            slug
             tournament {
               id
               name
@@ -1785,10 +1802,12 @@ class StartGGMatchPlugin(Star):
         event_name = str(event_data.get("name") or "").strip() or slug
         tournament = event_data.get("tournament") or {}
         tournament_name = str(tournament.get("name") or "").strip() or event_name
+        resolved_slug = str(event_data.get("slug") or "").strip() or slug
         return EventBindingInfo(
             event_id=eid,
             event_name=event_name,
             tournament_name=tournament_name,
+            slug=resolved_slug,
         )
 
     async def _resolve_event_from_reference(
@@ -1845,12 +1864,22 @@ class StartGGMatchPlugin(Star):
         phase_group_id: Optional[int],
         audit_kind: str,
         extra: Optional[Dict[str, Any]] = None,
+        slug: Optional[str] = None,
     ) -> None:
+        slug_norm = (slug or "").strip() or None
+        if slug_norm and slug_norm.startswith("http"):
+            parsed_link = _parse_startgg_link(slug_norm)
+            if parsed_link and parsed_link.get("type") == "slug":
+                slug_norm = parsed_link["slug"]
+        # 重新绑定时若未带 slug，保留旧 slug
+        if not slug_norm and code in self.tournaments:
+            slug_norm = self.tournaments[code].slug
         self.tournaments[code] = TournamentConfig(
             code=code,
             name=name.strip() or code,
             event_id=event_id,
             phase_group_id=phase_group_id,
+            slug=slug_norm,
         )
         self._save_tournaments()
         payload: Dict[str, Any] = {
@@ -1862,6 +1891,8 @@ class StartGGMatchPlugin(Star):
             "phaseGroupId": phase_group_id,
             "at": _now_ts(),
         }
+        if slug_norm:
+            payload["slug"] = slug_norm
         if extra:
             payload.update(extra)
         self.store.append_audit(payload)
@@ -2013,13 +2044,19 @@ class StartGGMatchPlugin(Star):
         if not self.token:
             return None, "缺少 start.gg apiToken，请先在插件配置中填写。"
         client = StartGGClient(self.token)
-        if _parse_startgg_link(reference):
+        parsed_ref = _parse_startgg_link(reference)
+        if parsed_ref:
             info, err = await self._resolve_event_from_reference(client, reference)
             if err:
                 return None, err
             assert info is not None
             audit_kind = "bind_tournament_link"
             extra: Optional[Dict[str, Any]] = {"link": reference}
+            # 链接解析出的 slug 优先，保证与导入链接一致
+            if parsed_ref.get("type") == "slug" and not info.slug:
+                info.slug = parsed_ref["slug"]
+            elif parsed_ref.get("type") == "slug":
+                info.slug = info.slug or parsed_ref["slug"]
         else:
             eid = _safe_int(reference)
             if not eid:
@@ -2043,6 +2080,7 @@ class StartGGMatchPlugin(Star):
             pgid,
             audit_kind,
             extra,
+            slug=info.slug,
         )
         return code, ""
 
@@ -2057,6 +2095,10 @@ class StartGGMatchPlugin(Star):
                     "name": t.name,
                     "eventId": t.event_id,
                     "phaseGroupId": t.phase_group_id,
+                    "slug": t.slug,
+                    "url": (
+                        f"https://www.start.gg/{t.slug}" if t.slug else None
+                    ),
                     "isActive": code == active,
                 }
             )
@@ -2090,6 +2132,10 @@ class StartGGMatchPlugin(Star):
                 "name": t.name if t else code,
                 "eventId": t.event_id if t else None,
                 "phaseGroupId": t.phase_group_id if t else None,
+                "slug": t.slug if t else None,
+                "url": (
+                    f"https://www.start.gg/{t.slug}" if t and t.slug else None
+                ),
             }
         )
 
@@ -2835,11 +2881,19 @@ class StartGGMatchPlugin(Star):
         display_name = name.strip() or self._display_binding_name(info)
         code = self._ensure_tournament_code(code_raw or None, info.tournament_name)
         self._save_tournament_binding(
-            self._sender_id(event), code, display_name, eid, pgid, "bind_tournament", None
+            self._sender_id(event),
+            code,
+            display_name,
+            eid,
+            pgid,
+            "bind_tournament",
+            None,
+            slug=info.slug,
         )
         yield event.plain_result(
             f"赛事绑定成功: {code} ({display_name})\neventId={eid}"
             + (f"\nphaseGroupId={pgid}" if pgid else "")
+            + (f"\nslug={info.slug}" if info.slug else "")
         )
 
     async def _handle_bind_tournament_link(self, event: AstrMessageEvent, args: str):
@@ -2867,6 +2921,10 @@ class StartGGMatchPlugin(Star):
 
         display_name = self._display_binding_name(info)
         code = self._ensure_tournament_code(code_raw, info.tournament_name)
+        parsed_link = _parse_startgg_link(link)
+        bind_slug = info.slug
+        if parsed_link and parsed_link.get("type") == "slug":
+            bind_slug = bind_slug or parsed_link["slug"]
         self._save_tournament_binding(
             self._sender_id(event),
             code,
@@ -2875,6 +2933,7 @@ class StartGGMatchPlugin(Star):
             pgid,
             "bind_tournament_link",
             {"link": link},
+            slug=bind_slug,
         )
         yield event.plain_result(
             f"赛事绑定成功: {code} ({display_name})\neventId={info.event_id}"
@@ -2938,6 +2997,10 @@ class StartGGMatchPlugin(Star):
 
         display_name = self._display_binding_name(info)
         code = self._ensure_tournament_code(code_raw, info.tournament_name)
+        bind_slug = info.slug
+        parsed_ref = _parse_startgg_link(reference)
+        if parsed_ref and parsed_ref.get("type") == "slug":
+            bind_slug = bind_slug or parsed_ref["slug"]
         self._save_tournament_binding(
             self._sender_id(event),
             code,
@@ -2946,6 +3009,7 @@ class StartGGMatchPlugin(Star):
             pgid,
             audit_kind,
             extra,
+            slug=bind_slug,
         )
         yield event.plain_result(
             f"赛事绑定成功: {code} ({display_name})\neventId={info.event_id}"

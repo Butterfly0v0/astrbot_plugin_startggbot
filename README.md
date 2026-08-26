@@ -34,6 +34,7 @@ AstrBot 插件：查询 [start.gg](https://www.start.gg) 对阵并支持自助�
 - 报分审计日志
 - **WebUI 管理面板**（插件详情 → `manage`）：赛事绑定/解绑/切换、QQ-start.gg 账号关联与导出
 - **@ 机器人触发指令**（群聊）；私聊可直接发送指令文本
+- **与 [astrbot_plugin_top8](https://github.com/Butterfly0v0/astrbot_plugin_top8) 互通**：绑定赛事时写入 start.gg `slug`，TOP8 插件可用同一套赛事简码生成成绩图（需本插件 ≥ v0.2.10）
 
 ## 安装
 
@@ -184,13 +185,21 @@ start.gg 个人主页 URL 中的用户标识，例如：
 插件运行后在 AstrBot 的 `data/plugin_data/astrbot_plugin_startggbot/` 下持久化（不在插件目录内，更新插件不会丢失）：
 
 - `bindings.json`：手动绑定
-- `tournaments.json`：动态绑定赛事
+- `tournaments.json`：动态绑定赛事（含 `code` / `name` / `eventId` / `phaseGroupId`；**v0.2.10+** 另存 `slug`，可供 [TOP8 插件](https://github.com/Butterfly0v0/astrbot_plugin_top8) 用简码生图）
 - `account_links.json`：QQ ↔ start.gg 账号关联
-- `settings.json`：WebUI 全局当前赛事
+- `settings.json`：WebUI 全局当前赛事（`active_tournament_code`，TOP8 发送裸指令 `TOP8` 时会读取）
 - `report_switch.json`：报分开关
 - `admin_qq_ids.json`：动态管理员
 - `audit_log.jsonl`：审计日志
 - `backups/`：手动备份快照（含 `manifest.json` 与各数据文件副本）
+
+### 与 TOP8 成绩图插件配合
+
+1. 升级本插件至 **v0.2.10+**，安装 [astrbot_plugin_top8](https://github.com/Butterfly0v0/astrbot_plugin_top8)。
+2. 用本插件绑定赛事（链接或 eventId）；新绑定会自动保存 `slug`。旧绑定可重新绑定一次，或由 TOP8 在首次用简码生图时自动补全。
+3. 在 TOP8 中：`TOP8`（当前赛事）/ `TOP8 <简码>` / `TOP8赛事`。
+
+两插件共享的是 AstrBot `plugin_data` 下的 JSON 文件，无需额外同步服务。
 
 ## 注意事项
 

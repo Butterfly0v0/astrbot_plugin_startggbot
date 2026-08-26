@@ -4,6 +4,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.10] - 2026-08-26
+
+### Added
+
+- 绑定赛事时持久化 start.gg `slug`（写入 `tournaments.json`），供 TOP8 等插件通过赛事简码复用链接
+
+### Changed
+
+- 赛事列表 Web API 返回 `slug` / `url` 字段
+
 ## [v0.2.9] - 2026-06-08
 
 ### Fixed
