@@ -4,6 +4,12 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.11] - 2026-10-24
+
+### Fixed
+
+- 聊天指令「切换」会把当前赛事写入 `settings.json`。此前只保存在会话内存里，管理页和 TOP8 仍读到切换前的赛事
+
 ## [v0.2.10] - 2026-08-26
 
 ### Added

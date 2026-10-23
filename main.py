@@ -397,7 +397,7 @@ class GGStore:
         return True
 
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.10")
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.11")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -2800,10 +2800,24 @@ class StartGGMatchPlugin(Star):
         if code not in self.tournaments:
             yield event.plain_result(f"未知赛事简码: {code}")
             return
+        operator = self._sender_id(event)
         self._set_session_tournament(event, code)
+        # 管理页与 TOP8 只读 settings.json，会话内切换必须同步写入全局当前赛事。
+        self._set_global_active_tournament(code, operator)
+        self.store.append_audit(
+            {
+                "kind": "switch_tournament_global",
+                "operator": operator,
+                "code": code,
+                "via": "chat",
+                "at": _now_ts(),
+            }
+        )
         t = self.tournaments[code]
         yield event.plain_result(
-            f"已切换到赛事: {code} ({t.name})\neventId: {t.event_id}"
+            f"已切换到赛事: {code} ({t.name})\n"
+            f"eventId: {t.event_id}\n"
+            "已同步为全局当前赛事，管理页与 TOP8 将使用该赛事。"
         )
 
     def _is_link_or_event_ref(self, text: str) -> bool:

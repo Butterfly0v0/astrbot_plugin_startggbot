@@ -132,7 +132,7 @@ start.gg 个人主页 URL 中的用户标识，例如：
 - `@机器人 绑定赛事全参 [简码] <名称> <eventId> [phaseGroupId]`
 - `@机器人 解绑赛事 <简码>`
 - `@机器人 赛事详情 <简码>`
-- `@机器人 切换 <赛事简码>`
+- `@机器人 切换 <赛事简码>`（同时写入全局当前赛事，管理页与 TOP8 会跟着更新）
 - `@机器人 绑定 <entrantId>`
 - `@机器人 我在哪`
 - `@机器人 查询 [用户名]`（省略时群聊用群名片）
@@ -187,7 +187,7 @@ start.gg 个人主页 URL 中的用户标识，例如：
 - `bindings.json`：手动绑定
 - `tournaments.json`：动态绑定赛事（含 `code` / `name` / `eventId` / `phaseGroupId`；**v0.2.10+** 另存 `slug`，可供 [TOP8 插件](https://github.com/Butterfly0v0/astrbot_plugin_top8) 用简码生图）
 - `account_links.json`：QQ ↔ start.gg 账号关联
-- `settings.json`：WebUI 全局当前赛事（`active_tournament_code`，TOP8 发送裸指令 `TOP8` 时会读取）
+- `settings.json`：全局当前赛事（`active_tournament_code`）。聊天「切换」和管理页「设为当前赛事」都会更新；TOP8 发送裸指令 `TOP8` 时读取此值
 - `report_switch.json`：报分开关
 - `admin_qq_ids.json`：动态管理员
 - `audit_log.jsonl`：审计日志
