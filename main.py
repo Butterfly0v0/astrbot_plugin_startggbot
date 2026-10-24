@@ -149,6 +149,7 @@ ADMIN_QQ_FILE = os.path.join(DATA_DIR, "admin_qq_ids.json")
 AUDIT_FILE = os.path.join(DATA_DIR, "audit_log.jsonl")
 ACCOUNT_LINKS_FILE = os.path.join(DATA_DIR, "account_links.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+RECENT_REPORTS_FILE = os.path.join(DATA_DIR, "recent_reports.json")
 
 # 按长度降序匹配，避免「绑定赛事」误匹配「绑定赛事全参」
 MENTION_COMMANDS = [
@@ -223,6 +224,76 @@ def _gql_id(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _retry_hint(action: str, detail: Any) -> str:
+    """对用户隐藏接口错误详情（多为网络或 HTTP 状态码），只提示稍后重试。"""
+    if isinstance(detail, BaseException):
+        logger.warning("%s", action, exc_info=detail)
+    else:
+        logger.warning("%s: %s", action, detail)
+    return f"{action}，请稍后重试。"
+
+
+def _blocking_recent_report(
+    records: List[Dict[str, Any]],
+    tournament: str,
+    entrant_id: int,
+    target_set: int,
+    now: int,
+    guard_sec: int,
+) -> Optional[Dict[str, Any]]:
+    """刚报完一场后，自动选中的另一场在保护时间内不写分。"""
+    if guard_sec <= 0 or not entrant_id or not target_set:
+        return None
+    chosen: Optional[Dict[str, Any]] = None
+    chosen_at = -1
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        reported_at = _safe_int(rec.get("reportedAt")) or 0
+        if now - reported_at >= guard_sec:
+            continue
+        if str(rec.get("tournament") or "") != str(tournament or ""):
+            continue
+        rec_set = _safe_int(rec.get("setId"))
+        if not rec_set or rec_set == target_set:
+            continue
+        entrant_ids = {
+            eid
+            for eid in (_safe_int(x) for x in (rec.get("entrantIds") or []))
+            if eid
+        }
+        if entrant_id not in entrant_ids:
+            continue
+        if reported_at >= chosen_at:
+            chosen = rec
+            chosen_at = reported_at
+    return chosen
+
+
+def _next_set_guard_message(
+    record: Dict[str, Any], entrant_id: int, proxy: bool
+) -> str:
+    round_text = str(record.get("round") or "").strip() or "未知轮次"
+    winner = str(record.get("winnerName") or "").strip() or "未知选手"
+    names = record.get("entrantNames") or {}
+    opponent = ""
+    if isinstance(names, dict):
+        for raw_id, raw_name in names.items():
+            if _safe_int(raw_id) == entrant_id:
+                continue
+            name = str(raw_name or "").strip()
+            if name:
+                opponent = name
+                break
+    if not opponent:
+        opponent = "未知对手"
+    who = "该选手" if proxy else "你"
+    return (
+        f"{who}刚结束的对局（{round_text}，对 {opponent}）已报完，胜者为{winner}。"
+        "未开打的下一场不会写入比分。"
+    )
 
 
 def _read_json(path: str, default_value: Any) -> Any:
@@ -396,8 +467,42 @@ class GGStore:
         self.save_account_links(links)
         return True
 
+    def get_recent_reports(self) -> List[Dict[str, Any]]:
+        data = _read_json(RECENT_REPORTS_FILE, {"reports": []})
+        reports = data.get("reports")
+        if not isinstance(reports, list):
+            return []
+        return [item for item in reports if isinstance(item, dict)]
 
-@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.11")
+    def save_recent_reports(self, reports: List[Dict[str, Any]]) -> None:
+        _write_json(RECENT_REPORTS_FILE, {"reports": reports})
+
+    def add_recent_report(self, record: Dict[str, Any], guard_sec: int) -> None:
+        now = _now_ts()
+        window = max(int(guard_sec), 1)
+        kept = [
+            item
+            for item in self.get_recent_reports()
+            if now - (_safe_int(item.get("reportedAt")) or 0) < window
+        ]
+        kept.append(record)
+        self.save_recent_reports(kept)
+
+    def remove_recent_report(self, set_id: int, reported_at: int) -> None:
+        reports = self.get_recent_reports()
+        kept = [
+            item
+            for item in reports
+            if not (
+                _safe_int(item.get("setId")) == set_id
+                and _safe_int(item.get("reportedAt")) == reported_at
+            )
+        ]
+        if len(kept) != len(reports):
+            self.save_recent_reports(kept)
+
+
+@register("astrbot_plugin_startggbot", "Butterfly0v0", "start.gg对阵查询与自助报分", "0.2.14")
 class StartGGMatchPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -415,6 +520,7 @@ class StartGGMatchPlugin(Star):
         self.report_enabled_default = bool(cfg.get("report_enabled_default", False))
         self.report_switch_scope = cfg.get("report_switch_scope", "per_tournament")
         self.report_cooldown_sec = int(cfg.get("report_cooldown_sec", 15))
+        self.report_next_set_guard_sec = int(cfg.get("report_next_set_guard_sec", 180))
         self.tournaments = self._load_tournaments_from_sources(
             cfg.get("tournaments", [])
         )
@@ -459,6 +565,7 @@ class StartGGMatchPlugin(Star):
             "report_enabled_default": legacy.get("reportEnabledDefault", False),
             "report_switch_scope": legacy.get("reportSwitchScope", "per_tournament"),
             "report_cooldown_sec": legacy.get("reportCooldownSec", 15),
+            "report_next_set_guard_sec": legacy.get("reportNextSetGuardSec", 180),
             "admin_qq_ids": legacy.get("admin_qq_ids", legacy.get("private_admin_qq_ids", [])),
             "tournaments": legacy.get("tournaments", []),
         }
@@ -470,6 +577,7 @@ class StartGGMatchPlugin(Star):
                 "report_enabled_default",
                 "report_switch_scope",
                 "report_cooldown_sec",
+                "report_next_set_guard_sec",
                 "admin_qq_ids",
             ):
                 if key in self.config:
@@ -908,7 +1016,7 @@ class StartGGMatchPlugin(Star):
                 {"eventId": _gql_id(tournament.event_id), "name": username},
             )
         except Exception as e:
-            return None, None, f"查询选手失败: {e}"
+            return None, None, _retry_hint("查询选手失败", e)
 
         nodes = (
             (((resp.get("data") or {}).get("event") or {}).get("entrants") or {}).get(
@@ -952,7 +1060,7 @@ class StartGGMatchPlugin(Star):
                         },
                     )
                 except Exception as e:
-                    return None, None, f"查询选手失败: {e}"
+                    return None, None, _retry_hint("查询选手失败", e)
                 page_nodes = (
                     (
                         ((resp.get("data") or {}).get("event") or {}).get("entrants")
@@ -1054,7 +1162,7 @@ class StartGGMatchPlugin(Star):
                     },
                 )
             except Exception as e:
-                return None, None, f"查询选手失败: {e}"
+                return None, None, _retry_hint("查询选手失败", e)
             page_nodes = (
                 (((resp.get("data") or {}).get("event") or {}).get("entrants") or {}).get(
                     "nodes"
@@ -1209,6 +1317,51 @@ class StartGGMatchPlugin(Star):
             return False
         self.report_cooldown[key] = now
         return True
+
+    def _auto_next_set_block(
+        self, tournament: str, entrant_id: int, target_set: int
+    ) -> Optional[Dict[str, Any]]:
+        return _blocking_recent_report(
+            self.store.get_recent_reports(),
+            tournament,
+            entrant_id,
+            target_set,
+            _now_ts(),
+            self.report_next_set_guard_sec,
+        )
+
+    def _remember_reported_set(
+        self,
+        tournament: str,
+        target_set: int,
+        slots: List[Dict[str, Any]],
+        entrant_ids: List[int],
+        winner_id: int,
+        winner_name: str,
+        round_text: str,
+        reported_at: int,
+    ) -> None:
+        if self.report_next_set_guard_sec <= 0:
+            return
+        names: Dict[str, str] = {}
+        for slot in slots:
+            entrant = slot.get("entrant") or {}
+            eid = _safe_int(entrant.get("id"))
+            if eid:
+                names[str(eid)] = str(entrant.get("name") or "").strip()
+        self.store.add_recent_report(
+            {
+                "setId": target_set,
+                "tournament": tournament,
+                "entrantIds": entrant_ids,
+                "entrantNames": names,
+                "round": round_text,
+                "winnerId": winner_id,
+                "winnerName": winner_name,
+                "reportedAt": reported_at,
+            },
+            self.report_next_set_guard_sec,
+        )
 
     def _parse_score(self, score: str) -> Optional[Tuple[int, int]]:
         cleaned = score.strip().replace("：", ":").replace("-", ":")
@@ -1418,6 +1571,10 @@ class StartGGMatchPlugin(Star):
                 id
                 fullRoundText
                 state
+                stream {{
+                  id
+                  streamName
+                }}
                 slots {{
                   entrant {{
                     id
@@ -1618,12 +1775,14 @@ class StartGGMatchPlugin(Star):
                 opp_score = score
 
         state = _safe_int(target.get("state")) or 0
+        stream = target.get("stream")
         result: Dict[str, Any] = {
             "ok": True,
             "setId": _safe_int(target.get("id")),
             "round": target.get("fullRoundText") or "未知轮次",
             "state": state,
             "opponent": opponent,
+            "streamed": isinstance(stream, dict) and bool(stream.get("id")),
         }
         if state == 3 and my_score is not None and opp_score is not None:
             result["scoreText"] = f"{my_score} - {opp_score}"
@@ -1637,13 +1796,13 @@ class StartGGMatchPlugin(Star):
         )
         target = self._pick_entrant_set(nodes, entrant_id, pick="latest")
         if not target:
+            if not nodes and fetch_err:
+                return {"ok": False, "msg": _retry_hint("查询失败", fetch_err)}
             msg = (
                 f"当前赛事(eventId={tournament.event_id})没有检索到你的对局，"
                 "请确认已切换至正确赛事。"
             )
-            if fetch_err:
-                msg += f"\nAPI: {fetch_err}"
-            elif not nodes:
+            if not nodes:
                 msg += "\n该选手在 bracket 中暂无已生成对局（可能尚未放签或轮空）。"
             return {"ok": False, "msg": msg}
         return self._parse_entrant_set_result(target, entrant_id)
@@ -1656,13 +1815,13 @@ class StartGGMatchPlugin(Star):
         )
         target, hint = self._pick_reportable_set(nodes, entrant_id)
         if not target:
+            if not nodes and fetch_err:
+                return {"ok": False, "msg": _retry_hint("查询对局失败", fetch_err)}
             msg = (
                 f"当前赛事(eventId={tournament.event_id})没有检索到可报分的对局，"
                 "请确认已切换至正确赛事。"
             )
-            if fetch_err:
-                msg += f"\nAPI: {fetch_err}"
-            elif not nodes:
+            if not nodes:
                 msg += "\n该选手在 bracket 中暂无已生成对局（可能尚未放签或轮空）。"
             elif hint.startswith("waiting:"):
                 parts = hint.split(":", 2)
@@ -1821,7 +1980,7 @@ class StartGGMatchPlugin(Star):
             try:
                 info = await self._query_event_info(client, parsed["event_id"])
             except Exception as e:
-                return None, f"查询 event 失败: {e}"
+                return None, _retry_hint("查询赛事失败", e)
             if not info:
                 return None, "未查询到该 eventId 对应赛事。"
             return info, ""
@@ -1830,7 +1989,7 @@ class StartGGMatchPlugin(Star):
         try:
             info = await self._query_event_by_slug(client, slug)
         except Exception as e:
-            return None, f"通过链接解析 event 失败: {e}"
+            return None, _retry_hint("查询赛事失败", e)
         if not info:
             return None, "链接无效或无权访问该 event。"
         return info, ""
@@ -1984,7 +2143,7 @@ class StartGGMatchPlugin(Star):
         try:
             user_info, err = await self._query_startgg_user_by_slug(client, slug)
         except Exception as e:
-            return None, f"查询 start.gg 用户失败: {e}"
+            return None, _retry_hint("查询 start.gg 用户失败", e)
         if err or not user_info:
             return None, err or "未找到 start.gg 用户。"
         qq_id = str(record.get("qq_id") or "")
@@ -2064,7 +2223,7 @@ class StartGGMatchPlugin(Star):
             try:
                 info = await self._query_event_info(client, eid)
             except Exception as e:
-                return None, f"拉取赛事信息失败: {e}"
+                return None, _retry_hint("拉取赛事信息失败", e)
             if not info:
                 return None, "未查询到该 eventId 对应赛事，请检查 eventId 或 token 权限。"
             audit_kind = "bind_tournament_auto"
@@ -2199,7 +2358,7 @@ class StartGGMatchPlugin(Star):
         try:
             user_info, err = await self._query_startgg_user_by_slug(client, slug)
         except Exception as e:
-            return error_response(f"查询 start.gg 用户失败: {e}", status_code=400)
+            return error_response(_retry_hint("查询 start.gg 用户失败", e), status_code=400)
         if err or not user_info:
             return error_response(err or "未找到 start.gg 用户。", status_code=400)
         operator = request.username or "webui"
@@ -2446,24 +2605,32 @@ class StartGGMatchPlugin(Star):
                 client, self.tournaments[tournament_code], entrant_id
             )
         except Exception as e:
-            yield event.plain_result(f"查询失败: {e}")
+            yield event.plain_result(_retry_hint("查询失败", e))
             return
 
         if not result.get("ok"):
             yield event.plain_result(result.get("msg", "查询失败"))
             return
 
-        state_map = {1: "未开始", 2: "进行中", 3: "已结束"}
-        msg = (
-            f"赛事: {tournament_code}\n"
-            f"查询对象: {query_target}\n"
+        detail = (
+            f"{query_target}\n"
             f"对局: {result['round']}\n"
             f"对手: {result['opponent']}\n"
-            f"状态: {state_map.get(result['state'], str(result['state']))}"
+            f"直播场次: {'是' if result.get('streamed') else '否'}"
         )
         if result.get("scoreText"):
-            msg += f"\n比分: {result['scoreText']}"
-        yield event.plain_result(msg)
+            detail += f"\n比分: {result['scoreText']}"
+
+        chain: List[Any] = [
+            Comp.Plain(f"赛事: {tournament_code}\n查询对象: "),
+        ]
+        sender_id = self._sender_id(event)
+        if self._is_group_message(event) and sender_id.isdigit():
+            chain.append(Comp.At(qq=sender_id))
+            chain.append(Comp.Plain(f" {detail}"))
+        else:
+            chain.append(Comp.Plain(detail))
+        yield event.chain_result(chain)
 
     def _merge_tournament_nodes(
         self, user_id: int, *sources: List[Dict[str, Any]]
@@ -2742,7 +2909,7 @@ class StartGGMatchPlugin(Star):
         try:
             result = await self._query_managed_tournaments(client)
         except Exception as e:
-            yield event.plain_result(f"查询失败: {e}")
+            yield event.plain_result(_retry_hint("查询失败", e))
             return
 
         if not result.get("ok"):
@@ -2887,7 +3054,7 @@ class StartGGMatchPlugin(Star):
         try:
             info = await self._query_event_info(client, eid)
         except Exception as e:
-            yield event.plain_result(f"查询赛事信息失败: {e}")
+            yield event.plain_result(_retry_hint("查询赛事信息失败", e))
             return
         if not info:
             yield event.plain_result("未查询到该 event 信息。")
@@ -2999,7 +3166,7 @@ class StartGGMatchPlugin(Star):
             try:
                 info = await self._query_event_info(client, eid)
             except Exception as e:
-                yield event.plain_result(f"拉取赛事信息失败: {e}")
+                yield event.plain_result(_retry_hint("拉取赛事信息失败", e))
                 return
             if not info:
                 yield event.plain_result(
@@ -3067,7 +3234,7 @@ class StartGGMatchPlugin(Star):
         try:
             user_info, err = await self._query_startgg_user_by_slug(client, slug)
         except Exception as e:
-            yield event.plain_result(f"查询 start.gg 用户失败: {e}")
+            yield event.plain_result(_retry_hint("查询 start.gg 用户失败", e))
             return
         if err or not user_info:
             yield event.plain_result(err or "未找到 start.gg 用户。")
@@ -3198,7 +3365,7 @@ class StartGGMatchPlugin(Star):
         try:
             resp = await self._query_set_detail(client, sid)
         except Exception as e:
-            yield event.plain_result(f"查询失败: {e}")
+            yield event.plain_result(_retry_hint("查询失败", e))
             return
         set_data = ((resp.get("data") or {}).get("set")) or {}
         if not set_data:
@@ -3299,6 +3466,7 @@ class StartGGMatchPlugin(Star):
 
         sender = self._sender_id(event)
         sid = _safe_int(set_id)
+        explicit_set = bool(sid)
         client = StartGGClient(self.token)
         t_code = tournament_code
         if not t_code or t_code not in self.tournaments:
@@ -3326,7 +3494,7 @@ class StartGGMatchPlugin(Star):
                     client, self.tournaments[t_code], entrant_id
                 )
             except Exception as e:
-                yield event.plain_result(f"查询对局失败: {e}")
+                yield event.plain_result(_retry_hint("查询对局失败", e))
                 return
             if not my_set.get("ok"):
                 yield event.plain_result(my_set.get("msg", "未找到可报分对局"))
@@ -3336,6 +3504,14 @@ class StartGGMatchPlugin(Star):
             yield event.plain_result("无法确定 setId，请在命令末尾显式传入 setId。")
             return
 
+        if not explicit_set:
+            blocked = self._auto_next_set_block(t_code, entrant_id, target_set)
+            if blocked:
+                yield event.plain_result(
+                    _next_set_guard_message(blocked, entrant_id, proxy_report)
+                )
+                return
+
         if not proxy_report and not self._check_report_cooldown(sender, target_set):
             yield event.plain_result("你操作太快了，请稍后重试。")
             return
@@ -3343,7 +3519,7 @@ class StartGGMatchPlugin(Star):
         try:
             set_detail_resp = await self._query_set_detail(client, target_set)
         except Exception as e:
-            yield event.plain_result(f"查询 set 失败: {e}")
+            yield event.plain_result(_retry_hint("查询 set 失败", e))
             return
         set_data = ((set_detail_resp.get("data") or {}).get("set")) or {}
         slots = set_data.get("slots") or []
@@ -3382,6 +3558,19 @@ class StartGGMatchPlugin(Star):
             entrant1_wins, entrant2_wins = opp_wins, my_wins
 
         game_data = self._build_set_game_data(entrant_ids, entrant1_wins, entrant2_wins)
+        winner_tag = self._entrant_name_from_slots(slots, winner_id) or "未知选手"
+        guard_stamp = _now_ts() if self.report_next_set_guard_sec > 0 else None
+        if guard_stamp is not None:
+            self._remember_reported_set(
+                t_code,
+                target_set,
+                slots,
+                entrant_ids,
+                winner_id,
+                winner_tag,
+                str(set_data.get("fullRoundText") or "").strip(),
+                guard_stamp,
+            )
 
         try:
             report_resp = await self._report_set(
@@ -3425,8 +3614,9 @@ class StartGGMatchPlugin(Star):
             if proxy_report:
                 audit_fail["proxyPlayerName"] = display_player
             self.store.append_audit(audit_fail)
-            yield event.plain_result(f"报分失败: {e}")
+            if guard_stamp is not None:
+                self.store.remove_recent_report(target_set, guard_stamp)
+            yield event.plain_result(_retry_hint("报分失败", e))
             return
 
-        winner_tag = self._entrant_name_from_slots(slots, winner_id) or "未知选手"
         yield event.plain_result(f"报分成功，胜者为{winner_tag}")

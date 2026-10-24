@@ -51,6 +51,12 @@
     "default": 15,
     "hint": "同一用户对同一 set 的最短报分间隔"
   },
+  "report_next_set_guard_sec": {
+    "description": "报分后保护下一场（秒）",
+    "type": "int",
+    "default": 180,
+    "hint": "一场报分成功后，双方在此时间内不带 setId 的报分不会写到另一场。设为 0 关闭"
+  },
   "manage_page_hint": {
     "description": "WebUI 管理面板",
     "type": "string",

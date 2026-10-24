@@ -8,5 +8,6 @@
   "reportEnabledDefault": false,
   "reportSwitchScope": "per_tournament",
   "reportCooldownSec": 15,
+  "reportNextSetGuardSec": 180,
   "admin_qq_ids": []
 }
